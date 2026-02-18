@@ -23,6 +23,7 @@ import {
   AppState,
   CoreExerciseId,
   DailyLog,
+  MealItem,
   WeeklyMeasurement,
   WorkoutSet
 } from './types'
@@ -162,7 +163,7 @@ export default function App() {
 
   const getExerciseOptionsForDay = (snapshotState: AppState, day: WorkoutDay) => {
     const planned = WORKOUT_DAY_EXERCISES[day]
-    const plannedIds = new Set(planned)
+    const plannedIds = new Set<string>(planned)
 
     const plannedItems = snapshotState.exerciseCatalog.filter((item) => plannedIds.has(item.id))
     const otherItems = snapshotState.exerciseCatalog.filter((item) => !plannedIds.has(item.id))
@@ -431,7 +432,7 @@ export default function App() {
       kcal: Number(draft.kcal)
     }
 
-    const newEntry = {
+    const newEntry: MealItem = {
       id: uid(),
       dayId: draftLog.id,
       meal,

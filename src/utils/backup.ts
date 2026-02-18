@@ -1,10 +1,37 @@
-import { AppState, DailyLog, WeeklyMeasurement } from '../types'
+import {
+  AppSettings,
+  AppSaveMeta,
+  AppState,
+  DailyLog,
+  ExerciseCatalogItem,
+  FoodPreset,
+  WeeklyMeasurement
+} from '../types'
 import { formatDateInputValue } from './metrics'
 
 type WeekExportResult = {
+  fileName: string
   content: string
   weekStart: string
   weekEnd: string
+  payload: {
+    exportMeta: {
+      appVersion: string
+      generatedAt: string
+      weekStart: string
+      weekEnd: string
+      timeZone: string
+      schemaVersion: number
+    }
+    logs: DailyLog[]
+    weeklyMeasurements: WeeklyMeasurement[]
+    draftByDate: Record<string, DailyLog>
+    draftByWeek: Record<string, WeeklyMeasurement>
+    presets: FoodPreset[]
+    exerciseCatalog: ExerciseCatalogItem[]
+    settings: AppSettings
+    meta: AppSaveMeta
+  }
 }
 
 const toWeekStart = (date: string) => {
@@ -53,23 +80,7 @@ export const getWeekBounds = (referenceDate = formatDateInputValue()) => {
   return { weekStart, weekEnd }
 }
 
-export const exportWeeklyJson = (state: AppState, referenceDate = formatDateInputValue()): WeekExportResult & {
-  fileName: string
-  payload: {
-    exportMeta: {
-      appVersion: string
-      generatedAt: string
-      weekStart: string
-      weekEnd: string
-      timeZone: string
-      schemaVersion: number
-    }
-    logs: DailyLog[]
-    weeklyMeasurements: WeeklyMeasurement[]
-    draftByDate: Record<string, DailyLog>
-    draftByWeek: Record<string, WeeklyMeasurement>
-  }
-} => {
+export const exportWeeklyJson = (state: AppState, referenceDate = formatDateInputValue()): WeekExportResult => {
   const { weekStart, weekEnd } = getWeekBounds(referenceDate)
   const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
 
@@ -102,7 +113,8 @@ export const exportWeeklyJson = (state: AppState, referenceDate = formatDateInpu
     weekStart,
     weekEnd,
     fileName: `health-tracker-semana-${weekStart}.json`,
-    content: JSON.stringify(payload, null, 2)
+    content: JSON.stringify(payload, null, 2),
+    payload
   }
 }
 
@@ -115,4 +127,3 @@ export const downloadJson = (content: string, fileName: string) => {
   anchor.click()
   URL.revokeObjectURL(url)
 }
-

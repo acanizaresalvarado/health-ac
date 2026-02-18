@@ -158,9 +158,10 @@ const lastWeeklyNumber = (rows: WeeklyMeasurement[], field: WeeklyNumberField): 
 }
 
 const avgByField = <K extends keyof DailyLog>(rows: DailyLog[], field: K): number => {
-  const values = rows
-    .map((row) => row[field])
-    .filter((value): value is number => typeof value === 'number')
+  const values = rows.flatMap((row) => {
+    const value = row[field]
+    return typeof value === 'number' && Number.isFinite(value) ? [value] : []
+  })
   return average(values)
 }
 
@@ -443,9 +444,21 @@ export const toCsv = (
 
   const lines = [header.join(',')]
   selected.forEach((log) => {
-    const meals = log.meals.length
+      const meals = log.meals.length
       ? log.meals
-      : [({ meal: '', grams: 0, p: 0, f: 0, c: 0, kcal: 0 } as MealItem)]
+      : [
+          {
+            id: `empty-${log.id}`,
+            dayId: log.id,
+            meal: 'desayuno',
+            grams: 0,
+            p: 0,
+            f: 0,
+            c: 0,
+            kcal: 0,
+            source: 'manual'
+          }
+        ]
     const sets = log.workout.flatMap((session) => session.sets)
     const rowsInDay = Math.max(meals.length, sets.length, 1)
     const weekly = getWeekForDate(weeklyRows, log.date)
