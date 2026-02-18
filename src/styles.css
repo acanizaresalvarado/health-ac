@@ -1,0 +1,541 @@
+:root {
+  --bg: linear-gradient(135deg, #0f172a, #1e293b);
+  --card: rgba(15, 23, 42, 0.75);
+  --text: #f8fafc;
+  --muted: #94a3b8;
+  --ok: #10b981;
+  --warn: #f59e0b;
+  --bad: #f43f5e;
+  --accent: #22d3ee;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: Inter, Avenir, sans-serif;
+  color: var(--text);
+  background: var(--bg);
+  min-height: 100vh;
+}
+
+input,
+select,
+button {
+  font: inherit;
+}
+
+button {
+  border: none;
+  cursor: pointer;
+  min-height: 44px;
+  min-width: 44px;
+  border-radius: 12px;
+  transition: transform 0.1s ease, filter 0.15s ease;
+}
+
+button:hover {
+  filter: brightness(1.04);
+}
+
+button:active {
+  transform: translateY(1px);
+}
+
+.app-shell {
+  max-width: 480px;
+  margin: 0 auto;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 72px;
+}
+
+.topbar {
+  position: sticky;
+  top: 0;
+  backdrop-filter: blur(6px);
+  background: rgba(15, 23, 42, 0.9);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.25);
+  z-index: 2;
+  padding: 0.75rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+}
+
+.topbar h1 {
+  margin: 0;
+  flex: 1 0 100%;
+  font-size: 1.2rem;
+}
+
+.quick-plan-button {
+  width: 100%;
+  margin: 0.25rem 0 0.5rem;
+  background: rgba(34, 211, 238, 0.22);
+  color: #e2feff;
+  border: 1px solid rgba(34, 211, 238, 0.45);
+}
+
+.plan-banner {
+  display: grid;
+  gap: 0.45rem;
+  margin-bottom: 0.75rem;
+}
+
+.kpi-status {
+  padding: 0.45rem;
+  border-radius: 10px;
+  display: inline-flex;
+  font-weight: 700;
+  font-size: 0.86rem;
+}
+
+.kpi-status.ok {
+  background: rgba(16, 185, 129, 0.15);
+  color: var(--ok);
+  border: 1px solid rgba(16, 185, 129, 0.45);
+}
+
+.kpi-status.warn {
+  background: rgba(245, 158, 11, 0.15);
+  color: var(--warn);
+  border: 1px solid rgba(245, 158, 11, 0.45);
+}
+
+.kpi-status.bad {
+  background: rgba(244, 63, 94, 0.15);
+  color: var(--bad);
+  border: 1px solid rgba(244, 63, 94, 0.45);
+}
+
+.tap-hints {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.tap-hint {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+main {
+  padding: 1rem;
+  flex: 1;
+}
+
+.section h2 {
+  margin: 0 0 0.75rem;
+}
+
+.message {
+  min-height: 1.2rem;
+  color: var(--accent);
+  font-size: 0.85rem;
+}
+
+
+.warning {
+  background: rgba(244, 63, 94, 0.18);
+  border: 1px solid rgba(244, 63, 94, 0.45);
+  color: #ffd1db;
+  margin: 0.5rem 0;
+  padding: 0.5rem;
+  border-radius: 8px;
+}
+
+.card {
+  background: var(--card);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 12px;
+  padding: 0.8rem;
+  margin-bottom: 0.8rem;
+}
+
+.card h3 {
+  margin-top: 0;
+}
+
+label,
+small,
+p {
+  font-size: 0.9rem;
+}
+
+input,
+select {
+  width: 100%;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.45);
+  background: rgba(2, 6, 23, 0.85);
+  color: var(--text);
+  padding: 0.45rem;
+  min-height: 44px;
+}
+
+input[type='checkbox'] {
+  min-height: auto;
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+}
+
+input[type='checkbox'].tiny-checkbox {
+  width: 18px;
+  height: 18px;
+}
+
+.split-row {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.5rem;
+  margin-bottom: 0.55rem;
+}
+
+.meal-block {
+  border-top: 1px solid rgba(148, 163, 184, 0.2);
+  padding-top: 0.6rem;
+  margin-top: 0.6rem;
+}
+
+.meal-header {
+  all: unset;
+  width: 100%;
+  cursor: pointer;
+  margin-bottom: 0.35rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  text-align: left;
+  padding: 0;
+  color: var(--text);
+  border-radius: 8px;
+}
+
+.meal-header strong {
+  display: block;
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.meal-header small {
+  display: block;
+  margin-top: 0.2rem;
+  color: var(--muted);
+}
+
+.meal-toggle {
+  color: var(--muted);
+  width: 1.45rem;
+  min-width: 1.45rem;
+  text-align: center;
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.meal-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 0.4rem;
+}
+
+.meal-list li {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.35rem 0;
+  border-bottom: 1px dashed rgba(148, 163, 184, 0.18);
+  gap: 0.65rem;
+}
+
+.meal-list li button {
+  background: transparent;
+  color: var(--bad);
+  min-width: 0;
+  min-height: 0;
+  padding: 0.3rem 0.4rem;
+}
+
+.plan-box {
+  margin-bottom: 0.5rem;
+  display: grid;
+  gap: 0.25rem;
+  background: rgba(148, 163, 184, 0.08);
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 8px;
+  padding: 0.5rem;
+  font-size: 0.86rem;
+}
+
+.workout-plan-list {
+  list-style: none;
+  padding: 0;
+  margin: 0.35rem 0 0.6rem;
+  display: grid;
+  gap: 0.3rem;
+  font-size: 0.85rem;
+}
+
+.workout-plan-list li {
+  display: flex;
+  gap: 0.45rem;
+}
+
+.workout-plan-list li.is-done {
+  color: var(--ok);
+}
+
+.meal-form {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.manual-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.35rem;
+}
+
+.workout-row {
+  border-top: 1px dashed rgba(148, 163, 184, 0.2);
+  padding: 0.45rem 0;
+}
+
+.primary {
+  background: var(--accent);
+  color: #001021;
+  padding: 0.6rem 1rem;
+  border-radius: 8px;
+  font-weight: 700;
+}
+
+.add-button {
+  background: #1d4ed8;
+  color: white;
+  padding: 0.55rem;
+  border-radius: 8px;
+}
+
+.kpi-grid {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.kpi-card {
+  padding: 0.65rem;
+  background: rgba(15, 23, 42, 0.7);
+  border-radius: 10px;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.history-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.history-list li {
+  background: rgba(15, 23, 42, 0.68);
+  border-left: 4px solid var(--muted);
+  border-radius: 8px;
+  padding: 0.65rem;
+}
+
+.history-list li.ok { border-left-color: var(--ok); }
+.history-list li.warn { border-left-color: var(--warn); }
+.history-list li.bad { border-left-color: var(--bad); }
+
+.link-like {
+  color: var(--accent);
+  text-decoration: underline;
+  background: transparent;
+  padding: 0;
+}
+
+.footer-card {
+  position: static;
+  z-index: auto;
+  margin-top: 0.5rem;
+}
+
+.goal-box {
+  background: rgba(34, 211, 238, 0.18);
+  border: 1px solid rgba(34, 211, 238, 0.4);
+  color: #cffafe;
+  border-radius: 8px;
+  padding: 0.45rem;
+  display: flex;
+  align-items: center;
+}
+
+.adherence-state {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 8px;
+  padding: 0.55rem;
+  font-size: 0.85rem;
+}
+
+.adherence-state.ok {
+  border-color: rgba(16, 185, 129, 0.5);
+  color: var(--ok);
+}
+
+.adherence-state.warn {
+  border-color: rgba(245, 158, 11, 0.5);
+  color: var(--warn);
+}
+
+.adherence-state.bad {
+  border-color: rgba(244, 63, 94, 0.5);
+  color: var(--bad);
+}
+
+.save-indicator {
+  display: inline-flex;
+  gap: 0.3rem;
+  margin-top: 0.45rem;
+  padding: 0.35rem 0.55rem;
+  border-radius: 8px;
+  font-size: 0.78rem;
+  border: 1px solid;
+}
+
+.save-indicator.saving {
+  border-color: rgba(14, 165, 233, 0.45);
+  color: #7dd3fc;
+  background: rgba(14, 165, 233, 0.08);
+}
+
+.save-indicator.saved {
+  border-color: rgba(16, 185, 129, 0.45);
+  color: var(--ok);
+  background: rgba(16, 185, 129, 0.1);
+}
+
+.save-indicator.offline {
+  border-color: rgba(244, 63, 94, 0.45);
+  color: var(--bad);
+  background: rgba(244, 63, 94, 0.1);
+}
+
+.workout-form {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.workout-toggle {
+  all: unset;
+  width: 100%;
+  cursor: pointer;
+  margin-top: 0.5rem;
+  padding: 0.6rem 0.65rem;
+  background: rgba(148, 163, 184, 0.15);
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 10px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  color: var(--text);
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.workout-toggle:active {
+  transform: none;
+  filter: brightness(1.05);
+}
+
+.workout-list-item {
+  list-style: none;
+  background: rgba(15, 23, 42, 0.68);
+  border-left: 4px solid var(--accent);
+  border-radius: 8px;
+  padding: 0.65rem;
+  margin-top: 0.65rem;
+}
+
+.workout-list-item button {
+  margin-top: 0.45rem;
+  background: transparent;
+  color: var(--bad);
+}
+
+.remove-button {
+  border: 1px solid rgba(244, 63, 94, 0.45);
+}
+
+.inline-input {
+  margin-top: 0.45rem;
+}
+
+.inline-input .split-row {
+  margin-top: 0.45rem;
+}
+
+.bottom-nav {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  background: rgba(15, 23, 42, 0.95);
+  border-top: 1px solid rgba(148, 163, 184, 0.3);
+}
+
+.bottom-nav button {
+  padding: 0.65rem 0.15rem;
+  color: var(--muted);
+  background: transparent;
+}
+
+.bottom-nav button.active {
+  color: var(--text);
+  background: rgba(34, 211, 238, 0.16);
+}
+
+.file-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.file-label input {
+  max-width: 220px;
+}
+
+.ok {
+  color: var(--ok);
+}
+
+@media (min-width: 640px) {
+  .app-shell {
+    max-width: 680px;
+  }
+
+  .section,
+  .card {
+    animation: fadeIn 0.25s ease;
+  }
+
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+      transform: translateY(6px);
+    }
+
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+}
