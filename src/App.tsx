@@ -31,12 +31,21 @@ import {
   CORE_EXERCISE_IDS,
   WORKOUT_DAY_EXERCISES,
   WORKOUT_DAY_OPTIONS,
+  DAY_TARGETS,
   type WorkoutDay,
   REMINDER_TIMES
 } from './constants'
 
-const TABS = ['Plan y reglas', 'Hoy', 'Historico', 'Medidas semanales', 'Ajustes/Exportar'] as const
+const TABS = ['Plan y reglas', 'Hoy', 'Historico', 'Medidas semanales', 'Exportar'] as const
 type Tab = (typeof TABS)[number]
+
+const TAB_ICON: Record<Tab, string> = {
+  'Plan y reglas': '📋',
+  Hoy: '🏠',
+  Historico: '📊',
+  'Medidas semanales': '📏',
+  Exportar: '💾'
+}
 
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'offline'
 
@@ -85,6 +94,8 @@ type WorkoutDraft = {
   rir: string
 }
 
+type MealAdvancedDraft = Record<MealName, boolean>
+
 const defaultMealDraft = (): Record<MealName, MealDraftState> => ({
   desayuno: { name: '', grams: 100, p: 0, f: 0, c: 0, kcal: 0 },
   comida: { name: '', grams: 160, p: 0, f: 0, c: 0, kcal: 0 },
@@ -104,6 +115,12 @@ const toNumber = (value: string): number => {
   return Number.isFinite(parsed) ? parsed : 0
 }
 
+const toTone = (ratio: number): 'ok' | 'warn' | 'bad' => {
+  if (ratio >= 0.9) return 'ok'
+  if (ratio >= 0.6) return 'warn'
+  return 'bad'
+}
+
 export default function App() {
   const [state, setState] = useState<AppState>(getDefaultState())
   const [loaded, setLoaded] = useState(false)
@@ -121,6 +138,11 @@ export default function App() {
     comida: true,
     cena: true
   })
+  const [mealAdvanced, setMealAdvanced] = useState<MealAdvancedDraft>({
+    desayuno: false,
+    comida: false,
+    cena: false
+  })
   const [workoutDraft, setWorkoutDraft] = useState<WorkoutDraft>(defaultWorkoutDraft(CORE_EXERCISE_IDS[0]))
   const [workoutDay, setWorkoutDay] = useState<WorkoutDay>('A')
   const [customExerciseName, setCustomExerciseName] = useState('')
@@ -132,13 +154,19 @@ export default function App() {
   const saveStatusTimer = useRef<number | null>(null)
   const draftDirtyRef = useRef(false)
   const draftSourceDateRef = useRef(formatDateInputValue())
-  const [workoutHistoryByDate, setWorkoutHistoryByDate] = useState<Record<string, boolean>>({})
+  const [workoutHistoryExpanded, setWorkoutHistoryExpanded] = useState(false)
 
   const kpis = useMemo(() => calculateKpis(state, new Date(activeDate)), [state, activeDate])
   const currentDecision = kpis.kpis14.decision
   const kpiDecisionTone = currentDecision === 'deload' ? 'bad' : currentDecision === 'none' ? 'ok' : 'warn'
   const kpi14Trend = kpis.kpis14.adherence >= 80 ? 'ok' : kpis.kpis14.adherence >= 60 ? 'warn' : 'bad'
   const draftTotals = getDailyTotals(draftLog)
+  const saveLabel =
+    saveStatus === 'saving'
+      ? 'Guardando…'
+      : saveStatus === 'offline'
+        ? 'Sin guardar (offline temporal)'
+        : 'Guardado'
 
   const getDraftBaseForDate = (snapshotState: AppState, date: string): DailyLog => {
     if (snapshotState.draftByDate?.[date]) {
@@ -193,10 +221,7 @@ export default function App() {
       setMealDrafts(defaultMealDraft())
       setWeeklyDraft({ ...weeklyBase, id: weeklyBase.id || uid() })
       setDraftLog({ ...baseline, adherence: computeDayAdherence(baseline) })
-      setWorkoutHistoryByDate((prev) => ({
-        ...prev,
-        [activeDate]: prev[activeDate] ?? Boolean(baseline.workout[0]?.sets.length)
-      }))
+      setWorkoutHistoryExpanded(Boolean(baseline.workout[0]?.sets.length))
       setWorkoutDraft((prev) => ({
         ...prev,
         exerciseId: getWorkoutDefaultExercise(loadedState, 'A', CORE_EXERCISE_IDS[0])
@@ -219,10 +244,7 @@ export default function App() {
     setDraftLog(currentDraft)
     setWeeklyDraft(weeklyBase)
     setMealDrafts(defaultMealDraft())
-    setWorkoutHistoryByDate((prev) => ({
-      ...prev,
-      [activeDate]: prev[activeDate] ?? hasRecordedWorkout
-    }))
+    setWorkoutHistoryExpanded(hasRecordedWorkout)
     setWorkoutDraft((prev) => ({
       ...prev,
       exerciseId: getWorkoutDefaultExercise(state, workoutDay)
@@ -410,6 +432,13 @@ export default function App() {
     }))
   }
 
+  const toggleMealAdvanced = (meal: MealName) => {
+    setMealAdvanced((prev) => ({
+      ...prev,
+      [meal]: !prev[meal]
+    }))
+  }
+
   const addMeal = (meal: MealName) => {
     const draft = mealDrafts[meal]
     const grams = Number(draft.grams)
@@ -517,10 +546,7 @@ export default function App() {
       rir
     })
 
-    setWorkoutHistoryByDate((prev) => ({
-      ...prev,
-      [activeDate]: true
-    }))
+    setWorkoutHistoryExpanded(true)
 
     setWorkoutDraft((prev) => ({ ...prev, sets: '', reps: '', weightKg: '', rir: '' }))
     setMessage('Ejercicio añadido/actualizado')
@@ -774,174 +800,227 @@ export default function App() {
   )
 
   const renderHoy = () => {
+    const mealCards = (['desayuno', 'comida', 'cena'] as MealName[]).map((meal) => {
+      const rows = draftLog.meals.filter((entry) => entry.meal === meal)
+      const target = mealTargetFor(draftLog.dayType, meal)
+      const totals = rows.reduce(
+        (acc, row) => ({
+          p: acc.p + row.p,
+          f: acc.f + row.f,
+          c: acc.c + row.c,
+          kcal: acc.kcal + row.kcal
+        }),
+        { p: 0, f: 0, c: 0, kcal: 0 }
+      )
+      const ratio = ((totals.p / target.p) + (totals.f / target.f) + (totals.c / target.c) + (totals.kcal / target.kcal)) / 4
+      const tone = toTone(ratio)
+      const isOpen = mealExpanded[meal]
+
+      return (
+        <div className="card task-card" key={meal}>
+          <button type="button" className="task-card__header" onClick={() => {
+            setMealExpanded((prev) => ({ ...prev, [meal]: !prev[meal] }))
+          }}>
+            <div>
+              <p className="task-card__title">{meal.toUpperCase()}</p>
+              <p className="task-card__meta">
+                {totals.p.toFixed(0)}P · {totals.f.toFixed(0)}F · {totals.c.toFixed(0)}C · {totals.kcal.toFixed(0)}kcal
+              </p>
+            </div>
+            <span className={`status-pill ${tone}`}>{rows.length ? 'Parcial' : 'Pendiente'}</span>
+            <span className="task-card__toggle">{isOpen ? '−' : '+'}</span>
+          </button>
+
+          {isOpen ? (
+            <div className="task-card__body">
+              {rows.length ? (
+                <ul className="history-list">
+                  {rows.map((entry) => {
+                    const label = entry.source === 'preset'
+                      ? state.presets.find((preset) => preset.id === entry.presetId)?.name
+                      : entry.notes
+
+                    return (
+                      <li className="meal-item" key={entry.id}>
+                        <div>
+                          {label ?? 'Comida'} · {entry.grams}g · {entry.p.toFixed(0)}P {entry.f.toFixed(0)}F {entry.c.toFixed(0)}C
+                        </div>
+                        <button type="button" className="remove-button" onClick={() => removeMeal(entry.id)}>
+                          Quitar
+                        </button>
+                      </li>
+                    )
+                  })}
+                </ul>
+              ) : null}
+
+              <div className="meal-form">
+                <label>
+                  Comida
+                  <input
+                    type="text"
+                    value={mealDrafts[meal].name}
+                    onChange={(event) => updateMealDraft(meal, { name: event.target.value })}
+                    placeholder="Ej. Arroz, pechuga, yogur..."
+                  />
+                </label>
+
+                <label>
+                  Gramos
+                  <input
+                    type="number"
+                    value={mealDrafts[meal].grams}
+                    onChange={(event) => updateMealDraft(meal, { grams: Number(event.target.value) })}
+                  />
+                </label>
+
+                <button type="button" className="ghost-link" onClick={() => toggleMealAdvanced(meal)}>
+                  {mealAdvanced[meal] ? 'Ocultar macros' : 'Añadir P/F/C/Kcal'}
+                </button>
+
+                {mealAdvanced[meal] ? (
+                  <div className="manual-grid">
+                    <label>
+                      P
+                      <input
+                        type="number"
+                        value={mealDrafts[meal].p}
+                        placeholder="P"
+                        onChange={(event) => updateMealDraft(meal, { p: Number(event.target.value) })}
+                      />
+                    </label>
+                    <label>
+                      F
+                      <input
+                        type="number"
+                        value={mealDrafts[meal].f}
+                        placeholder="F"
+                        onChange={(event) => updateMealDraft(meal, { f: Number(event.target.value) })}
+                      />
+                    </label>
+                    <label>
+                      C
+                      <input
+                        type="number"
+                        value={mealDrafts[meal].c}
+                        placeholder="C"
+                        onChange={(event) => updateMealDraft(meal, { c: Number(event.target.value) })}
+                      />
+                    </label>
+                    <label>
+                      kcal
+                      <input
+                        type="number"
+                        value={mealDrafts[meal].kcal}
+                        placeholder="kcal"
+                        onChange={(event) => updateMealDraft(meal, { kcal: Number(event.target.value) })}
+                      />
+                    </label>
+                  </div>
+                ) : null}
+
+                <button type="button" className="add-button" onClick={() => addMeal(meal)}>
+                  Añadir comida
+                </button>
+              </div>
+            </div>
+          ) : null}
+        </div>
+      )
+    })
+
     const totalWorkout = getCurrentWorkoutEntries()
     const workoutDayKeys = Object.keys(WORKOUT_DAY_OPTIONS) as WorkoutDay[]
     const workoutOptions = getExerciseOptionsForDay(state, workoutDay)
     const expectedExercises = WORKOUT_DAY_EXERCISES[workoutDay]
     const completedSet = new Set(totalWorkout.map((entry) => getWorkoutSetId(entry)))
-    const showWorkoutHistory = workoutHistoryByDate[activeDate] ?? Boolean(totalWorkout.length)
-    const saveLabel =
-      saveStatus === 'saving'
-        ? 'Guardando…'
-        : saveStatus === 'offline'
-          ? 'Sin guardar (offline temporal)'
-          : 'Guardado'
+    const completedExpected = expectedExercises.filter((id) => completedSet.has(id)).length
+    const mealSummaryCount = (['desayuno', 'comida', 'cena'] as MealName[]).reduce(
+      (acc, meal) => acc + (draftLog.meals.some((entry) => entry.meal === meal) ? 1 : 0),
+      0
+    )
+    const dayTarget = DAY_TARGETS[draftLog.dayType]
+    const dayRatio = ((draftTotals.p / dayTarget.p) + (draftTotals.f / dayTarget.f) + (draftTotals.c / dayTarget.c) + (draftTotals.kcal / dayTarget.kcal)) / 4
+    const dayTone = toTone(dayRatio)
     const activeIsDraft = Boolean(state.draftByDate?.[activeDate])
     const activeWeeklyIsDraft = Boolean(state.draftByWeek?.[toWeekStart(activeDate)])
-    const quickAccessPlan = activeTab !== 'Plan y reglas'
 
     return (
       <div className="section">
-        <h2>Hoy {activeDate}</h2>
-        {quickAccessPlan ? (
-          <button type="button" className="quick-plan-button" onClick={() => setActiveTab('Plan y reglas')}>
-            Ver plan y reglas
-          </button>
-        ) : null}
-        {activeIsDraft || activeWeeklyIsDraft ? (
-          <div className="warning">
-            {activeIsDraft ? 'Hay cambios diarios sin guardar. ' : ''}
-            {activeWeeklyIsDraft ? 'Y cambios semanales sin guardar.' : ''}
-          </div>
-        ) : null}
-        {saveStatus !== 'idle' ? <div className={`save-indicator ${saveStatus}`}>{saveLabel}</div> : null}
-
-        <div className="card">
-          <h3>Comidas</h3>
-          {(['desayuno', 'comida', 'cena'] as MealName[]).map((meal) => {
-            const total = draftLog.meals.filter((entry) => entry.meal === meal)
-            const target = mealTargetFor(draftLog.dayType, meal)
-            const isOpen = mealExpanded[meal]
-            const sum = total.reduce(
-              (acc, item) => ({
-                p: acc.p + item.p,
-                f: acc.f + item.f,
-                c: acc.c + item.c,
-                kcal: acc.kcal + item.kcal
-              }),
-              { p: 0, f: 0, c: 0, kcal: 0 }
-            )
-
-            return (
-              <div className="meal-block" key={meal}>
-                <button
-                  type="button"
-                  className="meal-header"
-                  onClick={() =>
-                    setMealExpanded((prev) => ({
-                      ...prev,
-                      [meal]: !prev[meal]
-                    }))
-                  }
-                >
-                  <div>
-                    <strong>
-                      {meal.toUpperCase()} {sum.p.toFixed(0)}P {sum.f.toFixed(0)}F {sum.c.toFixed(0)}C ({sum.kcal.toFixed(0)}
-                      kcal)
-                    </strong>
-                    <small>
-                      Objetivo: {target.p}P {target.f}F {target.c}C
-                    </small>
-                  </div>
-                  <span className="meal-toggle">{isOpen ? '−' : '+'}</span>
-                </button>
-
-                {isOpen ? (
-                  <>
-                    {total.length ? (
-                      <ul className="meal-list">
-                        {total.map((entry) => {
-                          const label = entry.source === 'preset'
-                            ? state.presets.find((preset) => preset.id === entry.presetId)?.name
-                            : entry.notes
-                          return (
-                            <li key={entry.id}>
-                              <span>
-                                {label ?? 'Comida'}: {entry.grams}g {entry.p.toFixed(0)}P {entry.f.toFixed(0)}F {entry.c.toFixed(0)}C
-                              </span>
-                              <button type="button" onClick={() => removeMeal(entry.id)}>
-                                X
-                              </button>
-                            </li>
-                          )
-                        })}
-                      </ul>
-                    ) : null}
-
-                    <div className="meal-form">
-                      <label>
-                        Comida
-                        <input
-                          type="text"
-                          value={mealDrafts[meal].name}
-                          onChange={(event) => updateMealDraft(meal, { name: event.target.value })}
-                          placeholder="Ej. Arroz, pechuga, yogur..."
-                        />
-                      </label>
-
-                      <label>
-                        Gramos
-                        <input
-                          type="number"
-                          value={mealDrafts[meal].grams}
-                          onChange={(event) => updateMealDraft(meal, { grams: Number(event.target.value) })}
-                        />
-                      </label>
-
-                      <div className="manual-grid">
-                        <label>
-                          P
-                          <input
-                            type="number"
-                            value={mealDrafts[meal].p}
-                            placeholder="P"
-                            onChange={(event) => updateMealDraft(meal, { p: Number(event.target.value) })}
-                          />
-                        </label>
-                        <label>
-                          F
-                          <input
-                            type="number"
-                            value={mealDrafts[meal].f}
-                            placeholder="F"
-                            onChange={(event) => updateMealDraft(meal, { f: Number(event.target.value) })}
-                          />
-                        </label>
-                        <label>
-                          C
-                          <input
-                            type="number"
-                            value={mealDrafts[meal].c}
-                            placeholder="C"
-                            onChange={(event) => updateMealDraft(meal, { c: Number(event.target.value) })}
-                          />
-                        </label>
-                        <label>
-                          kcal
-                          <input
-                            type="number"
-                            value={mealDrafts[meal].kcal}
-                            placeholder="kcal"
-                            onChange={(event) => updateMealDraft(meal, { kcal: Number(event.target.value) })}
-                          />
-                        </label>
-                      </div>
-
-                      <button type="button" className="add-button" onClick={() => addMeal(meal)}>
-                        Añadir comida
-                      </button>
-                    </div>
-                  </>
-                ) : null}
-              </div>
-            )
-          })}
+        <div className="section-intro">
+          <h2>Hoy</h2>
+          <p className="muted">{activeDate}</p>
         </div>
 
-        <div className="card">
-          <h3>Entreno (añade uno por uno)</h3>
+        <div className="card task-card">
+          <div className="task-card__header task-card__header--plain">
+            <div>
+              <p className="task-card__title">Estado del día</p>
+              <p className="task-card__meta">
+                Progreso: Comidas {mealSummaryCount}/3, entrenamiento {completedSet.size}/{expectedExercises.length}
+              </p>
+            </div>
+            <span className={`status-pill ${mealSummaryCount >= 1 ? 'ok' : 'warn'}`}>
+              {mealSummaryCount >= 1 ? 'Parcial' : 'Pendiente'}
+            </span>
+          </div>
+          <div className="task-card__body task-grid">
+            <span className={`status-pill ${activeIsDraft ? 'warn' : 'ok'}`}>
+              {activeIsDraft ? 'Cambios sin guardar' : 'Sin cambios'}
+            </span>
+            <span className={`status-pill ${dayTone}`}>{activeWeeklyIsDraft ? 'Semana pendiente' : 'Semana ok'}</span>
+          </div>
+        </div>
+
+        <div className="card task-card">
+          <div className="task-card__header task-card__header--plain">
+            <p className="task-card__title">Macros del día</p>
+            <span className={`status-pill ${dayTone}`}>{dayTone.toUpperCase()}</span>
+          </div>
+          <div className="task-card__body stat-row">
+            <div className="stat-value">{draftTotals.kcal.toFixed(0)} kcal</div>
+            <div className="stat-value">{draftTotals.p.toFixed(0)}P</div>
+            <div className="stat-value">{draftTotals.f.toFixed(0)}F</div>
+            <div className="stat-value">{draftTotals.c.toFixed(0)}C</div>
+          </div>
+          <div className="task-card__body">
+            <small>Objetivo {dayTarget.kcal} kcal · {dayTarget.p}P · {dayTarget.f}F · {dayTarget.c}C</small>
+          </div>
+        </div>
+
+        <div className="section-title-row">
+          <h3>Comidas</h3>
+          <button
+            type="button"
+            className="ghost-link"
+            onClick={() =>
+              setMealExpanded({
+                desayuno: !mealExpanded.desayuno,
+                comida: !mealExpanded.comida,
+                cena: !mealExpanded.cena
+              })
+            }
+          >
+            {mealExpanded.desayuno && mealExpanded.comida && mealExpanded.cena ? 'Colapsar' : 'Expandir'}
+          </button>
+        </div>
+        {mealCards}
+
+        <div className="card task-card">
+          <div className="task-card__header">
+            <div>
+              <p className="task-card__title">Entrenamiento · Bloque {workoutDay}</p>
+              <p className="task-card__meta">
+                {completedExpected}/{expectedExercises.length} ejercicios del bloque
+              </p>
+            </div>
+            <span className={`status-pill ${completedExpected >= expectedExercises.length ? 'ok' : 'warn'}`}>
+              {completedExpected >= expectedExercises.length ? 'Completo' : 'Pendiente'}
+            </span>
+          </div>
+
           <label>
-            Día de entrenamiento
+            Selecciona bloque A/B/C
             <select value={workoutDay} onChange={(event) => setWorkoutDay(event.target.value as WorkoutDay)}>
               {workoutDayKeys.map((key) => (
                 <option key={key} value={key}>
@@ -950,14 +1029,6 @@ export default function App() {
               ))}
             </select>
           </label>
-
-          <div className="plan-box">
-            <strong>Ruta diaria</strong>
-            <div>
-              {completedSet.size} ejercicios añadidos | bloque {workoutDay}:{' '}
-              {expectedExercises.filter((entry) => completedSet.has(entry)).length}/{expectedExercises.length}
-            </div>
-          </div>
 
           <ul className="workout-plan-list">
             {expectedExercises.map((entry) => {
@@ -1022,7 +1093,7 @@ export default function App() {
               </label>
             </div>
             <button type="button" className="add-button" onClick={addOrUpdateWorkout}>
-              Añadir / Actualizar
+              Añadir / actualizar
             </button>
 
             <label className="inline-input">
@@ -1039,33 +1110,22 @@ export default function App() {
                 </button>
               </div>
             </label>
+
+            <button type="button" className="ghost-link" onClick={() => setWorkoutHistoryExpanded((prev) => !prev)}>
+              {workoutHistoryExpanded ? 'Ocultar ejercicios registrados' : 'Ver ejercicios registrados'}
+            </button>
           </div>
 
-          <button
-            type="button"
-            className="workout-toggle"
-            onClick={() =>
-              setWorkoutHistoryByDate((prev) => ({
-                ...prev,
-                [activeDate]: !showWorkoutHistory
-              }))
-            }
-          >
-            <span>Ejercicios registrados ({totalWorkout.length})</span>
-            <span>{showWorkoutHistory ? '−' : '+'}</span>
-          </button>
-
-          {showWorkoutHistory ? (
+          {workoutHistoryExpanded ? (
             totalWorkout.length === 0 ? (
-              <div className="warning" style={{ marginTop: '0.5rem' }}>
-                Aun no has registrado ejercicios hoy.
-              </div>
+              <div className="warning">Aun no has registrado ejercicios hoy.</div>
             ) : (
               <ul className="history-list">
                 {totalWorkout.map((entry) => {
                   const exerciseId = getWorkoutSetId(entry)
                   const rowKey = exerciseId || `sin-id-${entry.exerciseId || entry.exercise}`
                   const exerciseSet = getSetDraftForExercise(exerciseId)
+
                   return (
                     <li className="workout-list-item" key={rowKey}>
                       <strong>{getExerciseName(exerciseId)}</strong>
@@ -1128,23 +1188,21 @@ export default function App() {
           ) : null}
         </div>
 
-        <div className="card footer-card">
+        <div className="card task-card">
           <label className="split-row">
             <span>Dia con gym</span>
             <input
-              className="tiny-checkbox"
               type="checkbox"
               checked={draftLog.dayType === 'gym'}
               onChange={(event) => updateDraft('dayType', event.target.checked ? 'gym' : 'nogym')}
             />
           </label>
-
-          <div>
-            Totales del dia: {draftTotals.p.toFixed(0)}P | {draftTotals.f.toFixed(0)}F | {draftTotals.c.toFixed(0)}C |{' '}
+          <div className="task-card__summary">
+            Totales del dia: {draftTotals.p.toFixed(0)}P · {draftTotals.f.toFixed(0)}F · {draftTotals.c.toFixed(0)}C ·{' '}
             {draftTotals.kcal.toFixed(0)} kcal
           </div>
           <button type="button" className="primary" onClick={saveDraft}>
-            Guardar dia
+            Guardar día
           </button>
         </div>
       </div>
@@ -1404,7 +1462,7 @@ export default function App() {
     const notificationLabel = state.settings.notificationsEnabled ? 'Desactivar' : 'Activar'
     return (
       <div className="section">
-        <h2>Ajustes / Exportar</h2>
+        <h2>Exportar</h2>
         <div className="card">
           <h3>Notificaciones</h3>
           <button type="button" onClick={setNotificationPermission}>
@@ -1448,8 +1506,16 @@ export default function App() {
   return (
     <div className="app-shell">
       <header className="topbar">
-        <h1>Health Tracker 2026</h1>
-        <input type="date" value={activeDate} onChange={(event) => setActiveDate(event.target.value)} />
+        <div className="topbar__row">
+          <h1>Health Tracker 2026</h1>
+          <button type="button" className="ghost-link" onClick={() => setActiveTab('Plan y reglas')}>
+            {activeTab === 'Plan y reglas' ? 'Inicio' : 'Plan'}
+          </button>
+        </div>
+        <div className="topbar__row">
+          <input type="date" value={activeDate} onChange={(event) => setActiveDate(event.target.value)} />
+          {saveStatus !== 'idle' ? <span className={`save-indicator ${saveStatus}`}>{saveLabel}</span> : null}
+        </div>
       </header>
 
       <main>
@@ -1466,7 +1532,7 @@ export default function App() {
         {activeTab === 'Hoy' ? renderHoy() : null}
         {activeTab === 'Historico' ? renderHistorico() : null}
         {activeTab === 'Medidas semanales' ? renderMedidasSemanales() : null}
-        {activeTab === 'Ajustes/Exportar' ? renderAjustes() : null}
+        {activeTab === 'Exportar' ? renderAjustes() : null}
       </main>
 
       <nav className="bottom-nav">
@@ -1475,6 +1541,8 @@ export default function App() {
             type="button"
             key={tab}
             className={activeTab === tab ? 'active' : ''}
+            data-icon={TAB_ICON[tab]}
+            aria-label={tab}
             onClick={() => setActiveTab(tab)}
           >
             {tab}
