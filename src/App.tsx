@@ -38,6 +38,11 @@ import {
 
 const TABS = ['Plan y reglas', 'Hoy', 'Historico', 'Medidas semanales', 'Exportar'] as const
 type Tab = (typeof TABS)[number]
+const SW_UPDATE_EVENT = 'health-tracker-sw-update'
+
+type UpdateEventDetail = {
+  registration?: ServiceWorkerRegistration
+}
 
 const TAB_ICON: Record<Tab, string> = {
   'Plan y reglas': '📋',
@@ -148,10 +153,13 @@ export default function App() {
   const [customExerciseName, setCustomExerciseName] = useState('')
   const [message, setMessage] = useState('')
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle')
+  const [updateAvailable, setUpdateAvailable] = useState(false)
   const timers = useRef<number[]>([])
   const draftAutosaveTimer = useRef<number | null>(null)
   const weeklyDraftAutosaveTimer = useRef<number | null>(null)
   const saveStatusTimer = useRef<number | null>(null)
+  const swUpdateRegistration = useRef<ServiceWorkerRegistration | null>(null)
+  const swReloadTimer = useRef<number | null>(null)
   const draftDirtyRef = useRef(false)
   const draftSourceDateRef = useRef(formatDateInputValue())
   const [workoutHistoryExpanded, setWorkoutHistoryExpanded] = useState(false)
@@ -369,6 +377,54 @@ export default function App() {
       timers.current = []
     }
   }, [loaded, state.settings.notificationsEnabled])
+
+  useEffect(() => {
+    const handleUpdate = (event: Event) => {
+      const customEvent = event as CustomEvent<UpdateEventDetail>
+      const registration = customEvent.detail?.registration ?? null
+
+      if (registration) {
+        swUpdateRegistration.current = registration
+      }
+
+      setUpdateAvailable(true)
+      setMessage('Nueva versión disponible')
+    }
+
+    window.addEventListener(SW_UPDATE_EVENT, handleUpdate)
+    return () => {
+      window.removeEventListener(SW_UPDATE_EVENT, handleUpdate)
+    }
+  }, [])
+
+  const applyAppUpdate = async () => {
+    const registration = swUpdateRegistration.current || (await navigator.serviceWorker.getRegistration())
+    const reload = () => {
+      if (swReloadTimer.current) {
+        window.clearTimeout(swReloadTimer.current)
+      }
+      window.location.reload()
+    }
+
+    setUpdateAvailable(false)
+    swReloadTimer.current = window.setTimeout(reload, 1000)
+
+    if (registration?.waiting) {
+      registration.waiting.addEventListener('statechange', () => {
+        if (registration.waiting?.state === 'activated') {
+          reload()
+        }
+      })
+      registration.waiting.postMessage({ type: 'SKIP_WAITING' })
+      return
+    }
+
+    if (registration?.update) {
+      await registration.update()
+    } else {
+      reload()
+    }
+  }
 
   const updateDraft = <K extends keyof DailyLog>(field: K, value: DailyLog[K]) => {
     draftDirtyRef.current = true
@@ -1519,7 +1575,16 @@ export default function App() {
       </header>
 
       <main>
-      <div className="message">{message}</div>
+        {updateAvailable ? (
+          <div className="update-banner">
+            <strong>Nueva versión disponible</strong>
+            <button type="button" onClick={applyAppUpdate}>
+              Actualizar ahora
+            </button>
+          </div>
+        ) : null}
+
+        <div className="message">{message}</div>
         <div className="tap-hints">
           <span className="tap-hint">Toque amplio y simple para móvil</span>
         </div>
