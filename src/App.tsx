@@ -1116,7 +1116,9 @@ export default function App() {
               <label>
                 Series
                 <input
-                  type="number"
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
                   value={workoutDraft.sets}
                   onChange={(event) => setWorkoutDraft((prev) => ({ ...prev, sets: event.target.value }))}
                 />
@@ -1124,7 +1126,9 @@ export default function App() {
               <label>
                 Reps
                 <input
-                  type="number"
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
                   value={workoutDraft.reps}
                   onChange={(event) => setWorkoutDraft((prev) => ({ ...prev, reps: event.target.value }))}
                 />
@@ -1134,7 +1138,9 @@ export default function App() {
               <label>
                 Kg
                 <input
-                  type="number"
+                  type="text"
+                  inputMode="decimal"
+                  pattern="[0-9]*[.,]?[0-9]*"
                   value={workoutDraft.weightKg}
                   onChange={(event) => setWorkoutDraft((prev) => ({ ...prev, weightKg: event.target.value }))}
                 />
@@ -1142,7 +1148,9 @@ export default function App() {
               <label>
                 RIR
                 <input
-                  type="number"
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
                   value={workoutDraft.rir}
                   onChange={(event) => setWorkoutDraft((prev) => ({ ...prev, rir: event.target.value }))}
                 />
@@ -1189,7 +1197,9 @@ export default function App() {
                         <label>
                           Series
                           <input
-                            type="number"
+                            type="text"
+                            inputMode="numeric"
+                            pattern="[0-9]*"
                             value={exerciseSet.sets}
                             onChange={(event) =>
                               updateWorkoutSet(exerciseId, 'sets', toNumber(event.target.value))
@@ -1199,7 +1209,9 @@ export default function App() {
                         <label>
                           Reps
                           <input
-                            type="number"
+                            type="text"
+                            inputMode="numeric"
+                            pattern="[0-9]*"
                             value={exerciseSet.reps}
                             onChange={(event) =>
                               updateWorkoutSet(exerciseId, 'reps', toNumber(event.target.value))
@@ -1211,7 +1223,9 @@ export default function App() {
                         <label>
                           Kg
                           <input
-                            type="number"
+                            type="text"
+                            inputMode="decimal"
+                            pattern="[0-9]*[.,]?[0-9]*"
                             value={exerciseSet.weightKg}
                             onChange={(event) =>
                               updateWorkoutSet(exerciseId, 'weightKg', toNumber(event.target.value))
@@ -1221,7 +1235,9 @@ export default function App() {
                         <label>
                           RIR
                           <input
-                            type="number"
+                            type="text"
+                            inputMode="numeric"
+                            pattern="[0-9]*"
                             value={exerciseSet.rir ?? ''}
                             onChange={(event) =>
                               updateWorkoutSet(
