@@ -2,6 +2,7 @@ import {
   AppState,
   CoreExerciseId,
   DailyLog,
+  MealItem,
   MealName,
   MeasurementEntry,
   PainLevel,
@@ -192,9 +193,9 @@ const avgFromMeasurementOrDaily = (
 const lumbarAvg = (rows: DailyLog[]) => average(rows.map((row) => row.lumbarPain))
 
 const latestMeasurementPainAverage = (rows: MeasurementEntry[]) => {
-  const values = rows
-    .map((row) => row.lumbarPain)
-    .filter((value): value is number => typeof value === 'number')
+  const values = rows.flatMap((row) =>
+    typeof row.lumbarPain === 'number' ? [row.lumbarPain] : []
+  )
   if (!values.length) return null
   return average(values)
 }
@@ -422,7 +423,7 @@ export const toCsv = (
 
   const lines = [header.join(',')]
   selected.forEach((log) => {
-      const meals = log.meals.length
+    const meals: MealItem[] = log.meals.length
       ? log.meals
       : [
           {
@@ -434,7 +435,8 @@ export const toCsv = (
             f: 0,
             c: 0,
             kcal: 0,
-            source: 'manual'
+            source: 'manual',
+            notes: ''
           }
         ]
     const sets = log.workout.flatMap((session) => session.sets)
