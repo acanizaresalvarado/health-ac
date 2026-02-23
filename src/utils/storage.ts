@@ -1,10 +1,17 @@
-import { AppState, AppSaveMeta, DailyLog, ExerciseCatalogItem, FoodPreset, WeeklyMeasurement } from '../types'
+import {
+  AppState,
+  AppSaveMeta,
+  DailyLog,
+  ExerciseCatalogItem,
+  FoodPreset,
+  MeasurementEntry
+} from '../types'
 import { DEFAULT_EXERCISE_CATALOG, DEFAULT_PRESETS } from '../constants'
 
 const STORAGE_KEY = 'health-tracker-state-v1'
 const DB_NAME = 'health-tracker-db'
 const STORE_NAME = 'state'
-const STORAGE_VERSION = 4
+const STORAGE_VERSION = 5
 
 const SAVE_DEBOUNCE_MS = 500
 const DEVICE_ID_KEY = 'health-tracker-device-id'
@@ -83,11 +90,10 @@ function safeParseJSON(raw: string): unknown {
 
 function normalizeState(input: Partial<AppState> | null): AppState {
   const logs = Array.isArray(input?.logs) ? input.logs : []
+  const rawMeasurements: MeasurementEntry[] = Array.isArray(input?.measurements) ? input.measurements : []
   const presets = Array.isArray(input?.presets) && input?.presets.length ? input.presets : DEFAULT_PRESETS
   const rawCatalog = Array.isArray(input?.exerciseCatalog) ? input.exerciseCatalog : []
   const rawDrafts = input?.draftByDate
-  const rawWeekly: WeeklyMeasurement[] = Array.isArray(input?.weeklyMeasurements) ? input.weeklyMeasurements : []
-  const rawDraftByWeek = input?.draftByWeek
 
   return {
     createdAt: normalizeDate(input?.createdAt),
@@ -95,11 +101,12 @@ function normalizeState(input: Partial<AppState> | null): AppState {
     version: STORAGE_VERSION,
     meta: normalizeMeta(input?.meta),
     logs,
+    measurements: normalizeMeasurements(rawMeasurements),
     presets,
     exerciseCatalog: normalizeExerciseCatalog(rawCatalog),
     draftByDate: rawDrafts && typeof rawDrafts === 'object' ? { ...(rawDrafts as Record<string, DailyLog>) } : {},
-    weeklyMeasurements: normalizeWeeklyMeasurements(rawWeekly),
-    draftByWeek: rawDraftByWeek && typeof rawDraftByWeek === 'object' ? { ...(rawDraftByWeek as Record<string, WeeklyMeasurement>) } : {},
+    weeklyMeasurements: [],
+    draftByWeek: {},
     settings: {
       notificationsEnabled: Boolean(input?.settings?.notificationsEnabled)
     }
@@ -126,16 +133,15 @@ function normalizeExerciseCatalog(rawCatalog: ExerciseCatalogItem[]): ExerciseCa
   return merged
 }
 
-function normalizeWeeklyMeasurements(rawWeekly: WeeklyMeasurement[]): WeeklyMeasurement[] {
+function normalizeMeasurements(rawRows: MeasurementEntry[]): MeasurementEntry[] {
   const seen = new Set<string>()
-  return rawWeekly
+  return rawRows
     .map((row) => ({
       id: row.id ?? uid(),
-      weekStart: row.weekStart,
-      avgWeightKg: typeof row.avgWeightKg === 'number' && Number.isFinite(row.avgWeightKg) ? row.avgWeightKg : undefined,
+      date: row.date,
+      weightKg: typeof row.weightKg === 'number' && Number.isFinite(row.weightKg) ? row.weightKg : undefined,
       waistCm: typeof row.waistCm === 'number' && Number.isFinite(row.waistCm) ? row.waistCm : undefined,
-      avgLumbarPain:
-        typeof row.avgLumbarPain === 'number' && Number.isFinite(row.avgLumbarPain) ? row.avgLumbarPain : undefined,
+      lumbarPain: typeof row.lumbarPain === 'number' && Number.isFinite(row.lumbarPain) ? row.lumbarPain : undefined,
       steps: typeof row.steps === 'number' && Number.isFinite(row.steps) ? row.steps : undefined,
       sleepHours: typeof row.sleepHours === 'number' && Number.isFinite(row.sleepHours) ? row.sleepHours : undefined,
       chestCm: typeof row.chestCm === 'number' && Number.isFinite(row.chestCm) ? row.chestCm : undefined,
@@ -143,13 +149,13 @@ function normalizeWeeklyMeasurements(rawWeekly: WeeklyMeasurement[]): WeeklyMeas
       armCm: typeof row.armCm === 'number' && Number.isFinite(row.armCm) ? row.armCm : undefined,
       hipsCm: typeof row.hipsCm === 'number' && Number.isFinite(row.hipsCm) ? row.hipsCm : undefined
     }))
-    .filter((row) => row.weekStart)
+    .filter((row) => row.date)
     .filter((row) => {
-      if (seen.has(row.weekStart)) return false
-      seen.add(row.weekStart)
+      if (seen.has(row.date)) return false
+      seen.add(row.date)
       return true
     })
-    .sort((a, b) => b.weekStart.localeCompare(a.weekStart))
+    .sort((a, b) => b.date.localeCompare(a.date))
 }
 
 function uid(): string {
@@ -318,6 +324,7 @@ export function getDefaultState(): AppState {
     updatedAt: toStringDate(),
     version: STORAGE_VERSION,
     logs: [],
+    measurements: [],
     presets: DEFAULT_PRESETS,
     exerciseCatalog: DEFAULT_EXERCISE_CATALOG,
     draftByDate: {},

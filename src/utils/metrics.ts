@@ -2,13 +2,12 @@ import {
   AppState,
   CoreExerciseId,
   DailyLog,
-  MealItem,
   MealName,
+  MeasurementEntry,
   PainLevel,
-  WeeklyMeasurement,
   WorkoutSession
 } from '../types'
-import { CORE_EXERCISE_IDS, DAY_TARGETS, CORE_EXERCISE_LABELS, MEAL_TARGETS } from '../constants'
+import { CORE_EXERCISE_IDS, CORE_EXERCISE_LABELS, MEAL_TARGETS } from '../constants'
 
 export type KpiDecision = 'none' | 'down150kcal' | 'up125kcal' | 'deload'
 
@@ -40,8 +39,6 @@ export interface KpiSummary {
     reason: string
   }
 }
-
-type WeeklyNumberField = keyof Omit<WeeklyMeasurement, 'id' | 'weekStart'>
 
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value))
 
@@ -96,14 +93,7 @@ export const getDailyTotals = (log: DailyLog): DailyTotal =>
 const getSetExerciseId = (set: { exerciseId?: string; exercise?: string }) =>
   set.exerciseId || (set.exercise ? set.exercise : '')
 
-const closeness = (actual: number, target: number) => {
-  if (target <= 0) return 1
-  return clamp(1 - Math.abs(actual - target) / target, 0, 1)
-}
-
 export const computeDayAdherence = (log: DailyLog) => {
-  const totals = getDailyTotals(log)
-  const target = DAY_TARGETS[log.dayType]
   const mealCompleted = {
     desayuno: log.meals.some((m) => m.meal === 'desayuno'),
     comida: log.meals.some((m) => m.meal === 'comida'),
@@ -116,23 +106,17 @@ export const computeDayAdherence = (log: DailyLog) => {
   if (!mealCompleted.cena) flags.push('missing_cena')
 
   const mealScore = [mealCompleted.desayuno, mealCompleted.comida, mealCompleted.cena].filter(Boolean).length / 3
-  const macroScore =
-    closeness(totals.p, target.p) * 0.45 +
-    closeness(totals.f, target.f) * 0.2 +
-    closeness(totals.c, target.c) * 0.2 +
-    closeness(totals.kcal, target.kcal) * 0.15
 
   return {
-    nutritionPercent: clamp(Math.round((mealScore * 0.35 + macroScore * 0.65) * 100), 0, 100),
+    nutritionPercent: clamp(Math.round(mealScore * 100), 0, 100),
     kpiFlags: flags
   }
 }
 
 const filterRange = (logs: DailyLog[], range: { start: string; end: string }) =>
   logs.filter((log) => isInRange(log.date, range.start, range.end))
-
-const filterWeeklyRange = (weeks: WeeklyMeasurement[], range: { start: string; end: string }) =>
-  weeks.filter((week) => isInRange(week.weekStart, range.start, range.end))
+const filterMeasurementRange = (rows: MeasurementEntry[], range: { start: string; end: string }) =>
+  rows.filter((row) => isInRange(row.date, range.start, range.end))
 
 const average = (values: number[]) => {
   if (!values.length) return 0
@@ -150,8 +134,10 @@ const lastNumberFor = <K extends keyof DailyLog>(rows: DailyLog[], field: K): nu
   return typeof value === 'number' ? value : null
 }
 
-const lastWeeklyNumber = (rows: WeeklyMeasurement[], field: WeeklyNumberField): number | null => {
-  const reversed = [...rows].sort((a, b) => b.weekStart.localeCompare(a.weekStart))
+type MeasurementNumberField = keyof Omit<MeasurementEntry, 'id' | 'date'>
+
+const lastMeasurementNumber = (rows: MeasurementEntry[], field: MeasurementNumberField): number | null => {
+  const reversed = [...rows].sort((a, b) => b.date.localeCompare(a.date))
   const row = reversed.find((item) => typeof item[field] === 'number')
   const value = row?.[field]
   return typeof value === 'number' ? value : null
@@ -165,40 +151,39 @@ const avgByField = <K extends keyof DailyLog>(rows: DailyLog[], field: K): numbe
   return average(values)
 }
 
-const avgWeeklyByField = (rows: WeeklyMeasurement[], field: WeeklyNumberField): number => {
+const avgMeasurementByField = (rows: MeasurementEntry[], field: MeasurementNumberField): number => {
   const values = rows
     .map((row) => row[field])
     .filter((value): value is number => typeof value === 'number')
   return average(values)
 }
 
-const latestFromWeeklyOrDaily = (
-  weeklyRows: WeeklyMeasurement[],
+const latestFromMeasurementOrDaily = (
+  measurementRows: MeasurementEntry[],
   dailyRows: DailyLog[],
-  weeklyField: WeeklyNumberField,
+  measurementField: MeasurementNumberField,
   dailyField: keyof DailyLog
 ): number | null => {
-  const weeklyValue = lastWeeklyNumber(weeklyRows, weeklyField)
-  if (weeklyValue != null) return weeklyValue
+  const measurementValue = lastMeasurementNumber(measurementRows, measurementField)
+  if (measurementValue != null) return measurementValue
 
   const dailyValue = lastNumberFor(dailyRows, dailyField)
   if (dailyValue == null) return null
   return dailyValue
 }
 
-const avgFromWeeklyOrDaily = (
-  weeklyRows: WeeklyMeasurement[],
+const avgFromMeasurementOrDaily = (
+  measurementRows: MeasurementEntry[],
   dailyRows: DailyLog[],
-  weeklyField: WeeklyNumberField,
+  measurementField: MeasurementNumberField,
   dailyField: keyof DailyLog
 ): number => {
-  const hasWeeklyValue = weeklyRows.some((row) => {
-    const value = row[weeklyField]
+  const hasMeasurementValue = measurementRows.some((row) => {
+    const value = row[measurementField]
     return typeof value === 'number' && Number.isFinite(value)
   })
-
-  if (hasWeeklyValue) {
-    return avgWeeklyByField(weeklyRows, weeklyField)
+  if (hasMeasurementValue) {
+    return avgMeasurementByField(measurementRows, measurementField)
   }
 
   return avgByField(dailyRows, dailyField)
@@ -206,9 +191,9 @@ const avgFromWeeklyOrDaily = (
 
 const lumbarAvg = (rows: DailyLog[]) => average(rows.map((row) => row.lumbarPain))
 
-const latestWeeklyPainAverage = (rows: WeeklyMeasurement[]) => {
+const latestMeasurementPainAverage = (rows: MeasurementEntry[]) => {
   const values = rows
-    .map((row) => row.avgLumbarPain)
+    .map((row) => row.lumbarPain)
     .filter((value): value is number => typeof value === 'number')
   if (!values.length) return null
   return average(values)
@@ -280,15 +265,16 @@ const performanceIndex = (state: AppState, fromDate = new Date()) => {
   return Number((diffs.reduce((a, b) => a + b, 0) / diffs.length).toFixed(3))
 }
 
-const weekHasHighPain = (rows: WeeklyMeasurement[], threshold = 7) => rows.some((row) => row.avgLumbarPain != null && row.avgLumbarPain >= threshold)
+const measurementHasHighPain = (rows: MeasurementEntry[], threshold = 7) =>
+  rows.some((row) => row.lumbarPain != null && row.lumbarPain >= threshold)
 
 const decide = (state: AppState, fromDate = new Date()) => {
   const this14 = filterRange(state.logs, getRange(14, fromDate))
   const prev14 = filterRange(state.logs, getRange(14, addDays(fromDate, -14)))
-  const this14Weekly = filterWeeklyRange(state.weeklyMeasurements ?? [], getRange(14, fromDate))
-  const prev14Weekly = filterWeeklyRange(state.weeklyMeasurements ?? [], getRange(14, addDays(fromDate, -14)))
+  const this14Measurements = filterMeasurementRange(state.measurements ?? [], getRange(14, fromDate))
+  const prev14Measurements = filterMeasurementRange(state.measurements ?? [], getRange(14, addDays(fromDate, -14)))
 
-  const hasHighPain = weekHasHighPain(this14Weekly) || hasConsecutivePainSpike(this14)
+  const hasHighPain = measurementHasHighPain(this14Measurements) || hasConsecutivePainSpike(this14)
   if (hasHighPain) {
     return {
       decision: 'deload' as KpiDecision,
@@ -297,10 +283,10 @@ const decide = (state: AppState, fromDate = new Date()) => {
     }
   }
 
-  const thisWaist = latestFromWeeklyOrDaily(this14Weekly, this14, 'waistCm', 'waistCm')
-  const prevWaist = latestFromWeeklyOrDaily(prev14Weekly, prev14, 'waistCm', 'waistCm')
-  const thisWeight = avgFromWeeklyOrDaily(this14Weekly, this14, 'avgWeightKg', 'weightKg')
-  const prevWeight = avgFromWeeklyOrDaily(prev14Weekly, prev14, 'avgWeightKg', 'weightKg')
+  const thisWaist = latestFromMeasurementOrDaily(this14Measurements, this14, 'waistCm', 'waistCm')
+  const prevWaist = latestFromMeasurementOrDaily(prev14Measurements, prev14, 'waistCm', 'waistCm')
+  const thisWeight = avgFromMeasurementOrDaily(this14Measurements, this14, 'weightKg', 'weightKg')
+  const prevWeight = avgFromMeasurementOrDaily(prev14Measurements, prev14, 'weightKg', 'weightKg')
   const adherence = this14.length
     ? Math.round(this14.reduce((sum, log) => sum + computeDayAdherence(log).nutritionPercent, 0) / this14.length)
     : 0
@@ -337,30 +323,30 @@ export const calculateKpis = (state: AppState, fromDate = new Date()): KpiSummar
   const prev7 = filterRange(state.logs, getRange(7, addDays(fromDate, -7)))
   const prev14 = filterRange(state.logs, getRange(14, addDays(fromDate, -14)))
 
-  const weekly7 = filterWeeklyRange(state.weeklyMeasurements ?? [], getRange(7, fromDate))
-  const weekly14 = filterWeeklyRange(state.weeklyMeasurements ?? [], getRange(14, fromDate))
-  const prevWeekly7 = filterWeeklyRange(state.weeklyMeasurements ?? [], getRange(7, addDays(fromDate, -7)))
-  const prevWeekly14 = filterWeeklyRange(state.weeklyMeasurements ?? [], getRange(14, addDays(fromDate, -14)))
+  const measurements7 = filterMeasurementRange(state.measurements ?? [], getRange(7, fromDate))
+  const measurements14 = filterMeasurementRange(state.measurements ?? [], getRange(14, fromDate))
+  const prevMeasurements7 = filterMeasurementRange(state.measurements ?? [], getRange(7, addDays(fromDate, -7)))
+  const prevMeasurements14 = filterMeasurementRange(state.measurements ?? [], getRange(14, addDays(fromDate, -14)))
 
-  const waist7 = latestFromWeeklyOrDaily(weekly7, rows7, 'waistCm', 'waistCm')
-  const waist14 = latestFromWeeklyOrDaily(weekly14, rows14, 'waistCm', 'waistCm')
-  const waist7Prev = latestFromWeeklyOrDaily(prevWeekly7, prev7, 'waistCm', 'waistCm')
-  const waist14Prev = latestFromWeeklyOrDaily(prevWeekly14, prev14, 'waistCm', 'waistCm')
+  const waist7 = latestFromMeasurementOrDaily(measurements7, rows7, 'waistCm', 'waistCm')
+  const waist14 = latestFromMeasurementOrDaily(measurements14, rows14, 'waistCm', 'waistCm')
+  const waist7Prev = latestFromMeasurementOrDaily(prevMeasurements7, prev7, 'waistCm', 'waistCm')
+  const waist14Prev = latestFromMeasurementOrDaily(prevMeasurements14, prev14, 'waistCm', 'waistCm')
 
   const weightPoints =
-    (weekly7.filter((row) => typeof row.avgWeightKg === 'number').length ?? 0) +
+    (measurements7.filter((row) => typeof row.weightKg === 'number').length ?? 0) +
     rows7.filter((row) => typeof row.weightKg === 'number').length
   const waistPoints =
-    (weekly7.filter((row) => typeof row.waistCm === 'number').length ?? 0) +
+    (measurements7.filter((row) => typeof row.waistCm === 'number').length ?? 0) +
     rows7.filter((row) => typeof row.waistCm === 'number').length
 
   return {
     kpis7: {
-      avgWeight: avgFromWeeklyOrDaily(weekly7, rows7, 'avgWeightKg', 'weightKg'),
+      avgWeight: avgFromMeasurementOrDaily(measurements7, rows7, 'weightKg', 'weightKg'),
       waist: waist7,
       waistTrend: waist7 != null && waist7Prev != null ? Number((waist7 - waist7Prev).toFixed(2)) : null,
       lumbar: (() => {
-        const pain = latestWeeklyPainAverage(weekly7)
+        const pain = latestMeasurementPainAverage(measurements7)
         if (pain != null) return pain
         return rows7.length ? lumbarAvg(rows7) : 0
       })(),
@@ -371,11 +357,11 @@ export const calculateKpis = (state: AppState, fromDate = new Date()): KpiSummar
       waistPoints
     },
     kpis14: {
-      avgWeight: avgFromWeeklyOrDaily(weekly14, rows14, 'avgWeightKg', 'weightKg'),
+      avgWeight: avgFromMeasurementOrDaily(measurements14, rows14, 'weightKg', 'weightKg'),
       waist: waist14,
       waistTrend: waist14 != null && waist14Prev != null ? Number((waist14 - waist14Prev).toFixed(2)) : null,
       lumbar: (() => {
-        const pain = latestWeeklyPainAverage(weekly14)
+        const pain = latestMeasurementPainAverage(measurements14)
         if (pain != null) return pain
         return rows14.length ? lumbarAvg(rows14) : 0
       })(),
@@ -396,22 +382,14 @@ const escapeValue = (value: string) => {
   return value
 }
 
-const getWeekForDate = (weeklyRows: WeeklyMeasurement[], date: string) => {
-  const ordered = [...weeklyRows].sort((a, b) => b.weekStart.localeCompare(a.weekStart))
-  return ordered.find((row) => {
-    const start = row.weekStart
-    const end = addDays(new Date(start + 'T00:00:00'), 6).toISOString().slice(0, 10)
-    return date >= start && date <= end
-  })
-}
-
 export const toCsv = (
   rows: AppState['logs'],
   start = getRange(7).start,
   end = getRange(7).end,
-  weeklyRows: AppState['weeklyMeasurements'] = []
+  measurements: AppState['measurements'] = []
 ) => {
   const selected = rows.filter((row) => isInRange(row.date, start, end))
+  const measurementMap = new Map(measurements.map((row) => [row.date, row]))
   const header = [
     'fecha',
     'tipo_dia',
@@ -420,11 +398,11 @@ export const toCsv = (
     'dolor_lumbar',
     'sueño_h',
     'pasos',
-    'peso_semanal_kg',
-    'cintura_semanal_cm',
-    'dolor_lumbar_promedio',
-    'sueño_semanal_h',
-    'pasos_semanal',
+    'peso_medida_kg',
+    'cintura_medida_cm',
+    'dolor_lumbar_medida',
+    'sueño_medida_h',
+    'pasos_medida',
     'pecho_cm',
     'hombros_cm',
     'brazo_cm',
@@ -461,7 +439,7 @@ export const toCsv = (
         ]
     const sets = log.workout.flatMap((session) => session.sets)
     const rowsInDay = Math.max(meals.length, sets.length, 1)
-    const weekly = getWeekForDate(weeklyRows, log.date)
+    const measurement = measurementMap.get(log.date)
 
     for (let i = 0; i < rowsInDay; i += 1) {
       const meal = meals[i]
@@ -474,21 +452,21 @@ export const toCsv = (
         String(log.lumbarPain),
         log.sleepHours ? String(log.sleepHours) : '',
         log.steps ? String(log.steps) : '',
-        weekly?.avgWeightKg != null ? String(weekly.avgWeightKg) : '',
-        weekly?.waistCm != null ? String(weekly.waistCm) : '',
-        weekly?.avgLumbarPain != null ? String(weekly.avgLumbarPain) : '',
-        weekly?.sleepHours != null ? String(weekly.sleepHours) : '',
-        weekly?.steps != null ? String(weekly.steps) : '',
-        weekly?.chestCm != null ? String(weekly.chestCm) : '',
-        weekly?.shouldersCm != null ? String(weekly.shouldersCm) : '',
-        weekly?.armCm != null ? String(weekly.armCm) : '',
-        weekly?.hipsCm != null ? String(weekly.hipsCm) : '',
-        meal ? `${meal.meal} (${meal.source})` : '',
-        meal ? String(meal.grams) : '',
-        meal ? String(meal.p) : '',
-        meal ? String(meal.f) : '',
-        meal ? String(meal.c) : '',
-        meal ? String(meal.kcal) : '',
+        measurement?.weightKg != null ? String(measurement.weightKg) : '',
+        measurement?.waistCm != null ? String(measurement.waistCm) : '',
+        measurement?.lumbarPain != null ? String(measurement.lumbarPain) : '',
+        measurement?.sleepHours != null ? String(measurement.sleepHours) : '',
+        measurement?.steps != null ? String(measurement.steps) : '',
+        measurement?.chestCm != null ? String(measurement.chestCm) : '',
+        measurement?.shouldersCm != null ? String(measurement.shouldersCm) : '',
+        measurement?.armCm != null ? String(measurement.armCm) : '',
+        measurement?.hipsCm != null ? String(measurement.hipsCm) : '',
+        meal ? `${meal.meal}: ${meal.notes || ''}` : '',
+        meal && meal.grams ? String(meal.grams) : '',
+        meal && meal.p ? String(meal.p) : '',
+        meal && meal.f ? String(meal.f) : '',
+        meal && meal.c ? String(meal.c) : '',
+        meal && meal.kcal ? String(meal.kcal) : '',
         set ? getSetExerciseId(set) : '',
         set ? String(set.sets) : '',
         set ? String(set.reps) : '',

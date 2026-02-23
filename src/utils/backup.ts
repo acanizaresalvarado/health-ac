@@ -5,6 +5,7 @@ import {
   DailyLog,
   ExerciseCatalogItem,
   FoodPreset,
+  MeasurementEntry,
   WeeklyMeasurement
 } from '../types'
 import { formatDateInputValue } from './metrics'
@@ -24,6 +25,7 @@ type WeekExportResult = {
       schemaVersion: number
     }
     logs: DailyLog[]
+    measurements: MeasurementEntry[]
     weeklyMeasurements: WeeklyMeasurement[]
     draftByDate: Record<string, DailyLog>
     draftByWeek: Record<string, WeeklyMeasurement>
@@ -85,6 +87,7 @@ export const exportWeeklyJson = (state: AppState, referenceDate = formatDateInpu
   const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
 
   const weeklyLogs = state.logs.filter((log) => inDateRange(log.date, weekStart, weekEnd))
+  const weeklyMeasurementsByDate = state.measurements.filter((row) => inDateRange(row.date, weekStart, weekEnd))
   const weeklyDrafts = filterDrafts(state.draftByDate || {}, weekStart, weekEnd)
 
   const weekMeasurements = state.weeklyMeasurements.filter((row) => inDateRange(row.weekStart, weekStart, weekEnd))
@@ -100,6 +103,7 @@ export const exportWeeklyJson = (state: AppState, referenceDate = formatDateInpu
       schemaVersion: state.version
     },
     logs: weeklyLogs,
+    measurements: weeklyMeasurementsByDate,
     weeklyMeasurements: weekMeasurements,
     draftByDate: weeklyDrafts,
     draftByWeek: weekDrafts,

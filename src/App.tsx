@@ -7,7 +7,6 @@ import {
   createEmptySession,
   getDailyTotals,
   getRange,
-  mealTargetFor,
   toCsv,
   uid,
   formatDateInputValue
@@ -21,22 +20,20 @@ import {
 import { downloadJson, exportWeeklyJson } from './utils/backup'
 import {
   AppState,
-  CoreExerciseId,
   DailyLog,
+  MeasurementEntry,
   MealItem,
-  WeeklyMeasurement,
   WorkoutSet
 } from './types'
 import {
   CORE_EXERCISE_IDS,
   WORKOUT_DAY_EXERCISES,
   WORKOUT_DAY_OPTIONS,
-  DAY_TARGETS,
   type WorkoutDay,
   REMINDER_TIMES
 } from './constants'
 
-const TABS = ['Plan y reglas', 'Hoy', 'Historico', 'Medidas semanales', 'Exportar'] as const
+const TABS = ['Plan y reglas', 'Hoy', 'Historico', 'Medidas', 'Exportar'] as const
 type Tab = (typeof TABS)[number]
 const SW_UPDATE_EVENT = 'health-tracker-sw-update'
 
@@ -48,7 +45,7 @@ const TAB_ICON: Record<Tab, string> = {
   'Plan y reglas': '📋',
   Hoy: '🏠',
   Historico: '📊',
-  'Medidas semanales': '📏',
+  Medidas: '📏',
   Exportar: '💾'
 }
 
@@ -56,20 +53,12 @@ type SaveStatus = 'idle' | 'saving' | 'saved' | 'offline'
 
 const getWorkoutSetId = (set: { exerciseId?: string; exercise?: string }) => set.exerciseId || set.exercise || ''
 
-const toWeekStart = (date: string) => {
-  const base = new Date(`${date}T00:00:00`)
-  const day = base.getDay()
-  const diff = (day + 6) % 7
-  base.setDate(base.getDate() - diff)
-  return base.toISOString().slice(0, 10)
-}
-
-const emptyWeeklyMeasurement = (weekStart: string): WeeklyMeasurement => ({
+const emptyMeasurementEntry = (date: string): MeasurementEntry => ({
   id: '',
-  weekStart,
-  avgWeightKg: undefined,
+  date,
+  weightKg: undefined,
   waistCm: undefined,
-  avgLumbarPain: undefined,
+  lumbarPain: undefined,
   steps: undefined,
   sleepHours: undefined,
   chestCm: undefined,
@@ -77,15 +66,6 @@ const emptyWeeklyMeasurement = (weekStart: string): WeeklyMeasurement => ({
   armCm: undefined,
   hipsCm: undefined
 })
-
-type MealDraftState = {
-  name: string
-  grams: number
-  p: number
-  f: number
-  c: number
-  kcal: number
-}
 
 type MealExpandedState = Record<MealName, boolean>
 
@@ -99,12 +79,10 @@ type WorkoutDraft = {
   rir: string
 }
 
-type MealAdvancedDraft = Record<MealName, boolean>
-
-const defaultMealDraft = (): Record<MealName, MealDraftState> => ({
-  desayuno: { name: '', grams: 100, p: 0, f: 0, c: 0, kcal: 0 },
-  comida: { name: '', grams: 160, p: 0, f: 0, c: 0, kcal: 0 },
-  cena: { name: '', grams: 180, p: 0, f: 0, c: 0, kcal: 0 }
+const defaultMealDraft = (): Record<MealName, string> => ({
+  desayuno: '',
+  comida: '',
+  cena: ''
 })
 
 const defaultWorkoutDraft = (fallbackExerciseId: string): WorkoutDraft => ({
@@ -116,14 +94,8 @@ const defaultWorkoutDraft = (fallbackExerciseId: string): WorkoutDraft => ({
 })
 
 const toNumber = (value: string): number => {
-  const parsed = Number(value)
+  const parsed = Number(value.replace(',', '.'))
   return Number.isFinite(parsed) ? parsed : 0
-}
-
-const toTone = (ratio: number): 'ok' | 'warn' | 'bad' => {
-  if (ratio >= 0.9) return 'ok'
-  if (ratio >= 0.6) return 'warn'
-  return 'bad'
 }
 
 export default function App() {
@@ -132,21 +104,16 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>('Plan y reglas')
   const [activeDate, setActiveDate] = useState(formatDateInputValue())
   const [draftLog, setDraftLog] = useState<DailyLog>(() => createEmptyLog(formatDateInputValue()))
-  const [weeklyDraft, setWeeklyDraft] = useState<WeeklyMeasurement>(
-    emptyWeeklyMeasurement(toWeekStart(formatDateInputValue()))
+  const [measurementDraft, setMeasurementDraft] = useState<MeasurementEntry>(
+    emptyMeasurementEntry(formatDateInputValue())
   )
-  const [mealDrafts, setMealDrafts] = useState<Record<MealName, MealDraftState>>({
+  const [mealDrafts, setMealDrafts] = useState<Record<MealName, string>>({
     ...defaultMealDraft()
   })
   const [mealExpanded, setMealExpanded] = useState<MealExpandedState>({
     desayuno: true,
     comida: true,
     cena: true
-  })
-  const [mealAdvanced, setMealAdvanced] = useState<MealAdvancedDraft>({
-    desayuno: false,
-    comida: false,
-    cena: false
   })
   const [workoutDraft, setWorkoutDraft] = useState<WorkoutDraft>(defaultWorkoutDraft(CORE_EXERCISE_IDS[0]))
   const [workoutDay, setWorkoutDay] = useState<WorkoutDay>('A')
@@ -156,7 +123,6 @@ export default function App() {
   const [updateAvailable, setUpdateAvailable] = useState(false)
   const timers = useRef<number[]>([])
   const draftAutosaveTimer = useRef<number | null>(null)
-  const weeklyDraftAutosaveTimer = useRef<number | null>(null)
   const saveStatusTimer = useRef<number | null>(null)
   const swUpdateRegistration = useRef<ServiceWorkerRegistration | null>(null)
   const swReloadTimer = useRef<number | null>(null)
@@ -168,7 +134,6 @@ export default function App() {
   const currentDecision = kpis.kpis14.decision
   const kpiDecisionTone = currentDecision === 'deload' ? 'bad' : currentDecision === 'none' ? 'ok' : 'warn'
   const kpi14Trend = kpis.kpis14.adherence >= 80 ? 'ok' : kpis.kpis14.adherence >= 60 ? 'warn' : 'bad'
-  const draftTotals = getDailyTotals(draftLog)
   const saveLabel =
     saveStatus === 'saving'
       ? 'Guardando…'
@@ -186,15 +151,10 @@ export default function App() {
     return createEmptyLog(date)
   }
 
-  const getWeeklyDraftBaseForDate = (snapshotState: AppState, date: string): WeeklyMeasurement => {
-    const weekStart = toWeekStart(date)
-    const draft = snapshotState.draftByWeek?.[weekStart]
-    if (draft) return { ...draft, weekStart }
-
-    const persisted = snapshotState.weeklyMeasurements.find((row) => row.weekStart === weekStart)
-    if (persisted) return { ...persisted }
-
-    return emptyWeeklyMeasurement(weekStart)
+  const getMeasurementBaseForDate = (snapshotState: AppState, date: string): MeasurementEntry => {
+    const persisted = snapshotState.measurements.find((row) => row.date === date)
+    if (persisted) return { ...persisted, date }
+    return emptyMeasurementEntry(date)
   }
 
   const getExerciseOptionsForDay = (snapshotState: AppState, day: WorkoutDay) => {
@@ -223,11 +183,11 @@ export default function App() {
   useEffect(() => {
     ;(async () => {
       const loadedState = await loadAppState()
-      const weeklyBase = getWeeklyDraftBaseForDate(loadedState, activeDate)
       const baseline = getDraftBaseForDate(loadedState, activeDate)
+      const measurementBase = getMeasurementBaseForDate(loadedState, formatDateInputValue())
       setState(loadedState)
       setMealDrafts(defaultMealDraft())
-      setWeeklyDraft({ ...weeklyBase, id: weeklyBase.id || uid() })
+      setMeasurementDraft({ ...measurementBase, id: measurementBase.id || uid() })
       setDraftLog({ ...baseline, adherence: computeDayAdherence(baseline) })
       setWorkoutHistoryExpanded(Boolean(baseline.workout[0]?.sets.length))
       setWorkoutDraft((prev) => ({
@@ -245,12 +205,10 @@ export default function App() {
     if (draftSourceDateRef.current === activeDate) return
 
     const selected = getDraftBaseForDate(state, activeDate)
-    const weeklyBase = getWeeklyDraftBaseForDate(state, activeDate)
     const currentDraft = { ...selected, adherence: computeDayAdherence(selected) }
     const hasRecordedWorkout = Boolean(currentDraft.workout[0]?.sets.length)
 
     setDraftLog(currentDraft)
-    setWeeklyDraft(weeklyBase)
     setMealDrafts(defaultMealDraft())
     setWorkoutHistoryExpanded(hasRecordedWorkout)
     setWorkoutDraft((prev) => ({
@@ -259,7 +217,7 @@ export default function App() {
     }))
     draftSourceDateRef.current = activeDate
     draftDirtyRef.current = false
-  }, [activeDate, state.logs, state.exerciseCatalog, state.weeklyMeasurements, state.draftByDate, state.draftByWeek, loaded, workoutDay])
+  }, [activeDate, state.logs, state.exerciseCatalog, state.draftByDate, loaded, workoutDay])
 
   useEffect(() => {
     if (!loaded) return
@@ -285,30 +243,11 @@ export default function App() {
   }, [draftLog, activeDate, loaded])
 
   useEffect(() => {
-    if (!loaded) return
-
-    const current = { ...weeklyDraft, weekStart: toWeekStart(activeDate), id: weeklyDraft.id || uid() }
-
-    if (weeklyDraftAutosaveTimer.current) {
-      window.clearTimeout(weeklyDraftAutosaveTimer.current)
-    }
-
-    weeklyDraftAutosaveTimer.current = window.setTimeout(() => {
-      setState((prev) => ({
-        ...prev,
-        draftByWeek: {
-          ...(prev.draftByWeek || {}),
-          [current.weekStart]: current
-        }
-      }))
-    }, 600)
-
-    return () => {
-      if (weeklyDraftAutosaveTimer.current) {
-        window.clearTimeout(weeklyDraftAutosaveTimer.current)
-      }
-    }
-  }, [weeklyDraft, activeDate, loaded])
+    if (!loaded || activeTab !== 'Medidas') return
+    const today = formatDateInputValue()
+    const current = getMeasurementBaseForDate(state, today)
+    setMeasurementDraft((prev) => ({ ...current, id: current.id || prev.id || uid() }))
+  }, [loaded, activeTab, state.measurements])
 
   useEffect(() => {
     if (!loaded) return
@@ -431,8 +370,9 @@ export default function App() {
     setDraftLog((prev) => ({ ...prev, [field]: value }))
   }
 
-  const updateWeeklyDraft = <K extends keyof WeeklyMeasurement>(field: K, value: WeeklyMeasurement[K]) => {
-    setWeeklyDraft((prev) => ({ ...prev, [field]: value }))
+  const updateMeasurementDraft = <K extends keyof MeasurementEntry>(field: K, value: MeasurementEntry[K]) => {
+    const today = formatDateInputValue()
+    setMeasurementDraft((prev) => ({ ...prev, date: today, [field]: value }))
   }
 
   const saveDraft = () => {
@@ -461,60 +401,41 @@ export default function App() {
     setMessage('Registro guardado')
   }
 
-  const saveWeekly = () => {
+  const saveMeasurement = () => {
+    const saveDate = formatDateInputValue()
+    const payload: MeasurementEntry = {
+      ...measurementDraft,
+      id: measurementDraft.id || uid(),
+      date: saveDate,
+      lumbarPain:
+        measurementDraft.lumbarPain == null ? undefined : (clampPain(measurementDraft.lumbarPain) as MeasurementEntry['lumbarPain'])
+    }
+
     setState((prev) => {
-      const weekStart = toWeekStart(activeDate)
-      const records = prev.weeklyMeasurements.some((row) => row.weekStart === weekStart)
-      const entry = { ...weeklyDraft, weekStart, id: weeklyDraft.id || uid() }
-      const weeklyMeasurements = records
-        ? prev.weeklyMeasurements.map((row) => (row.weekStart === weekStart ? entry : row))
-        : [...prev.weeklyMeasurements, entry]
-
-      const draftByWeek = { ...(prev.draftByWeek || {}) }
-      delete draftByWeek[weekStart]
-
-      return { ...prev, weeklyMeasurements, draftByWeek }
+      const existing = prev.measurements.some((row) => row.date === saveDate)
+      const measurements = existing
+        ? prev.measurements.map((row) => (row.date === saveDate ? payload : row))
+        : [...prev.measurements, payload]
+      measurements.sort((a, b) => b.date.localeCompare(a.date))
+      return { ...prev, measurements }
     })
-    setMessage('Medidas semanales guardadas')
+
+    setMeasurementDraft(payload)
+    setMessage('Medidas guardadas')
   }
 
-  const updateMealDraft = (meal: MealName, updates: Partial<MealDraftState>) => {
+  const updateMealDraft = (meal: MealName, value: string) => {
     setMealDrafts((prev) => ({
       ...prev,
-      [meal]: {
-        ...prev[meal],
-        ...updates
-      }
-    }))
-  }
-
-  const toggleMealAdvanced = (meal: MealName) => {
-    setMealAdvanced((prev) => ({
-      ...prev,
-      [meal]: !prev[meal]
+      [meal]: value
     }))
   }
 
   const addMeal = (meal: MealName) => {
-    const draft = mealDrafts[meal]
-    const grams = Number(draft.grams)
-    const foodName = draft.name.trim()
-
-    if (!grams || grams <= 0) {
-      setMessage('Indica gramos antes de guardar comida')
-      return
-    }
-
+    const foodName = mealDrafts[meal].trim()
     if (!foodName) {
       setMessage('Añade nombre de comida')
       return
-    }
-
-    const itemData = {
-      p: Number(draft.p),
-      f: Number(draft.f),
-      c: Number(draft.c),
-      kcal: Number(draft.kcal)
     }
 
     const newEntry: MealItem = {
@@ -522,28 +443,23 @@ export default function App() {
       dayId: draftLog.id,
       meal,
       presetId: undefined,
-      grams,
-      p: itemData.p,
-      f: itemData.f,
-      c: itemData.c,
-      kcal: itemData.kcal,
+      grams: 0,
+      p: 0,
+      f: 0,
+      c: 0,
+      kcal: 0,
       source: 'manual',
       notes: foodName
     }
 
     draftDirtyRef.current = true
-    setDraftLog((prev) => ({ ...prev, meals: [...prev.meals, newEntry] }))
+    setDraftLog((prev) => {
+      const meals = prev.meals.filter((entry) => entry.meal !== meal)
+      return { ...prev, meals: [...meals, newEntry] }
+    })
     setMealDrafts((prev) => ({
       ...prev,
-      [meal]: {
-        ...prev[meal],
-        name: '',
-        grams: meal === 'desayuno' ? 100 : meal === 'comida' ? 160 : 180,
-        p: 0,
-        f: 0,
-        c: 0,
-        kcal: 0
-      }
+      [meal]: ''
     }))
     setMessage('Comida añadida')
   }
@@ -704,7 +620,7 @@ export default function App() {
 
   const range7 = getRange(7)
   const exportCsv = () => {
-    const csv = toCsv(state.logs, range7.start, range7.end, state.weeklyMeasurements)
+    const csv = toCsv(state.logs, range7.start, range7.end, state.measurements)
     const blob = new Blob([csv], { type: 'text/csv' })
     const url = URL.createObjectURL(blob)
     const anchor = document.createElement('a')
@@ -723,6 +639,7 @@ export default function App() {
       try {
         const raw = JSON.parse(String(reader.result)) as {
           logs?: DailyLog[]
+          measurements?: AppState['measurements']
           presets?: AppState['presets']
           exerciseCatalog?: AppState['exerciseCatalog']
           draftByDate?: AppState['draftByDate']
@@ -731,12 +648,10 @@ export default function App() {
         }
 
         const incomingLogs = Array.isArray(raw.logs) ? raw.logs : []
+        const incomingMeasurements = Array.isArray(raw.measurements) ? raw.measurements : []
         const incomingPresets = Array.isArray(raw.presets) ? raw.presets : []
         const incomingCatalog = Array.isArray(raw.exerciseCatalog) ? raw.exerciseCatalog : []
         const incomingDrafts = raw.draftByDate && typeof raw.draftByDate === 'object' ? raw.draftByDate : {}
-        const incomingWeekly = Array.isArray(raw.weeklyMeasurements) ? raw.weeklyMeasurements : []
-        const incomingDraftByWeek =
-          raw.draftByWeek && typeof raw.draftByWeek === 'object' ? raw.draftByWeek : {}
 
         setState((prev) => {
           const byDate = new Map(prev.logs.map((row) => [row.date, row]))
@@ -766,24 +681,21 @@ export default function App() {
             }
           })
 
-          const byWeek = new Map(prev.weeklyMeasurements.map((row) => [row.weekStart, row]))
-          incomingWeekly.forEach((row) => {
-            if (!row?.weekStart) return
-            if (!byWeek.has(row.weekStart)) {
-              byWeek.set(row.weekStart, row)
+          const byMeasurementDate = new Map(prev.measurements.map((row) => [row.date, row]))
+          incomingMeasurements.forEach((row) => {
+            if (!row?.date) return
+            if (!byMeasurementDate.has(row.date)) {
+              byMeasurementDate.set(row.date, row)
             }
           })
-
-          const nextDraftByWeek = { ...(prev.draftByWeek || {}), ...(incomingDraftByWeek as Record<string, WeeklyMeasurement>) }
 
           return {
             ...prev,
             logs: Array.from(byDate.values()),
+            measurements: Array.from(byMeasurementDate.values()).sort((a, b) => b.date.localeCompare(a.date)),
             presets: nextPresets,
             exerciseCatalog: nextCatalog,
-            weeklyMeasurements: Array.from(byWeek.values()),
-            draftByDate: { ...(prev.draftByDate || {}), ...(incomingDrafts as Record<string, DailyLog>) },
-            draftByWeek: nextDraftByWeek
+            draftByDate: { ...(prev.draftByDate || {}), ...(incomingDrafts as Record<string, DailyLog>) }
           }
         })
 
@@ -858,126 +770,53 @@ export default function App() {
   const renderHoy = () => {
     const mealCards = (['desayuno', 'comida', 'cena'] as MealName[]).map((meal) => {
       const rows = draftLog.meals.filter((entry) => entry.meal === meal)
-      const target = mealTargetFor(draftLog.dayType, meal)
-      const totals = rows.reduce(
-        (acc, row) => ({
-          p: acc.p + row.p,
-          f: acc.f + row.f,
-          c: acc.c + row.c,
-          kcal: acc.kcal + row.kcal
-        }),
-        { p: 0, f: 0, c: 0, kcal: 0 }
-      )
-      const ratio = ((totals.p / target.p) + (totals.f / target.f) + (totals.c / target.c) + (totals.kcal / target.kcal)) / 4
-      const tone = toTone(ratio)
+      const note = rows[0]?.notes?.trim() || ''
+      const tone = note ? 'ok' : 'warn'
       const isOpen = mealExpanded[meal]
 
       return (
         <div className="card task-card" key={meal}>
-          <button type="button" className="task-card__header" onClick={() => {
-            setMealExpanded((prev) => ({ ...prev, [meal]: !prev[meal] }))
-          }}>
+          <button
+            type="button"
+            className="task-card__header"
+            onClick={() => {
+              setMealExpanded((prev) => ({ ...prev, [meal]: !prev[meal] }))
+            }}
+          >
             <div>
               <p className="task-card__title">{meal.toUpperCase()}</p>
-              <p className="task-card__meta">
-                {totals.p.toFixed(0)}P · {totals.f.toFixed(0)}F · {totals.c.toFixed(0)}C · {totals.kcal.toFixed(0)}kcal
-              </p>
+              <p className="task-card__meta">{note || 'Sin registro'}</p>
             </div>
-            <span className={`status-pill ${tone}`}>{rows.length ? 'Parcial' : 'Pendiente'}</span>
-            <span className="task-card__toggle">{isOpen ? '−' : '+'}</span>
+            <span className={`status-pill ${tone}`}>{note ? 'Completo' : 'Pendiente'}</span>
+            <span className="task-card__toggle">{isOpen ? '-' : '+'}</span>
           </button>
 
           {isOpen ? (
             <div className="task-card__body">
-              {rows.length ? (
-                <ul className="history-list">
-                  {rows.map((entry) => {
-                    const label = entry.source === 'preset'
-                      ? state.presets.find((preset) => preset.id === entry.presetId)?.name
-                      : entry.notes
-
-                    return (
-                      <li className="meal-item" key={entry.id}>
-                        <div>
-                          {label ?? 'Comida'} · {entry.grams}g · {entry.p.toFixed(0)}P {entry.f.toFixed(0)}F {entry.c.toFixed(0)}C
-                        </div>
-                        <button type="button" className="remove-button" onClick={() => removeMeal(entry.id)}>
-                          Quitar
-                        </button>
-                      </li>
-                    )
-                  })}
-                </ul>
+              {note ? (
+                <div className="plan-box">
+                  <strong>Guardado:</strong> {note}
+                </div>
               ) : null}
 
               <div className="meal-form">
                 <label>
-                  Comida
+                  Qué comiste
                   <input
                     type="text"
-                    value={mealDrafts[meal].name}
-                    onChange={(event) => updateMealDraft(meal, { name: event.target.value })}
-                    placeholder="Ej. Arroz, pechuga, yogur..."
+                    value={mealDrafts[meal]}
+                    onChange={(event) => updateMealDraft(meal, event.target.value)}
+                    placeholder="Ej. arroz con pollo, ensalada con atún..."
                   />
                 </label>
-
-                <label>
-                  Gramos
-                  <input
-                    type="number"
-                    value={mealDrafts[meal].grams}
-                    onChange={(event) => updateMealDraft(meal, { grams: Number(event.target.value) })}
-                  />
-                </label>
-
-                <button type="button" className="ghost-link" onClick={() => toggleMealAdvanced(meal)}>
-                  {mealAdvanced[meal] ? 'Ocultar macros' : 'Añadir P/F/C/Kcal'}
-                </button>
-
-                {mealAdvanced[meal] ? (
-                  <div className="manual-grid">
-                    <label>
-                      P
-                      <input
-                        type="number"
-                        value={mealDrafts[meal].p}
-                        placeholder="P"
-                        onChange={(event) => updateMealDraft(meal, { p: Number(event.target.value) })}
-                      />
-                    </label>
-                    <label>
-                      F
-                      <input
-                        type="number"
-                        value={mealDrafts[meal].f}
-                        placeholder="F"
-                        onChange={(event) => updateMealDraft(meal, { f: Number(event.target.value) })}
-                      />
-                    </label>
-                    <label>
-                      C
-                      <input
-                        type="number"
-                        value={mealDrafts[meal].c}
-                        placeholder="C"
-                        onChange={(event) => updateMealDraft(meal, { c: Number(event.target.value) })}
-                      />
-                    </label>
-                    <label>
-                      kcal
-                      <input
-                        type="number"
-                        value={mealDrafts[meal].kcal}
-                        placeholder="kcal"
-                        onChange={(event) => updateMealDraft(meal, { kcal: Number(event.target.value) })}
-                      />
-                    </label>
-                  </div>
-                ) : null}
-
                 <button type="button" className="add-button" onClick={() => addMeal(meal)}>
-                  Añadir comida
+                  Guardar comida
                 </button>
+                {rows[0] ? (
+                  <button type="button" className="remove-button" onClick={() => removeMeal(rows[0].id)}>
+                    Quitar registro
+                  </button>
+                ) : null}
               </div>
             </div>
           ) : null}
@@ -992,14 +831,11 @@ export default function App() {
     const completedSet = new Set(totalWorkout.map((entry) => getWorkoutSetId(entry)))
     const completedExpected = expectedExercises.filter((id) => completedSet.has(id)).length
     const mealSummaryCount = (['desayuno', 'comida', 'cena'] as MealName[]).reduce(
-      (acc, meal) => acc + (draftLog.meals.some((entry) => entry.meal === meal) ? 1 : 0),
+      (acc, meal) => acc + (draftLog.meals.some((entry) => entry.meal === meal && entry.notes?.trim()) ? 1 : 0),
       0
     )
-    const dayTarget = DAY_TARGETS[draftLog.dayType]
-    const dayRatio = ((draftTotals.p / dayTarget.p) + (draftTotals.f / dayTarget.f) + (draftTotals.c / dayTarget.c) + (draftTotals.kcal / dayTarget.kcal)) / 4
-    const dayTone = toTone(dayRatio)
+    const dayTone = mealSummaryCount === 3 ? 'ok' : mealSummaryCount >= 1 ? 'warn' : 'bad'
     const activeIsDraft = Boolean(state.draftByDate?.[activeDate])
-    const activeWeeklyIsDraft = Boolean(state.draftByWeek?.[toWeekStart(activeDate)])
 
     return (
       <div className="section">
@@ -1016,31 +852,15 @@ export default function App() {
                 Progreso: Comidas {mealSummaryCount}/3, entrenamiento {completedSet.size}/{expectedExercises.length}
               </p>
             </div>
-            <span className={`status-pill ${mealSummaryCount >= 1 ? 'ok' : 'warn'}`}>
-              {mealSummaryCount >= 1 ? 'Parcial' : 'Pendiente'}
+            <span className={`status-pill ${dayTone}`}>
+              {mealSummaryCount === 3 ? 'Completo' : mealSummaryCount >= 1 ? 'Parcial' : 'Pendiente'}
             </span>
           </div>
           <div className="task-card__body task-grid">
             <span className={`status-pill ${activeIsDraft ? 'warn' : 'ok'}`}>
               {activeIsDraft ? 'Cambios sin guardar' : 'Sin cambios'}
             </span>
-            <span className={`status-pill ${dayTone}`}>{activeWeeklyIsDraft ? 'Semana pendiente' : 'Semana ok'}</span>
-          </div>
-        </div>
-
-        <div className="card task-card">
-          <div className="task-card__header task-card__header--plain">
-            <p className="task-card__title">Macros del día</p>
-            <span className={`status-pill ${dayTone}`}>{dayTone.toUpperCase()}</span>
-          </div>
-          <div className="task-card__body stat-row">
-            <div className="stat-value">{draftTotals.kcal.toFixed(0)} kcal</div>
-            <div className="stat-value">{draftTotals.p.toFixed(0)}P</div>
-            <div className="stat-value">{draftTotals.f.toFixed(0)}F</div>
-            <div className="stat-value">{draftTotals.c.toFixed(0)}C</div>
-          </div>
-          <div className="task-card__body">
-            <small>Objetivo {dayTarget.kcal} kcal · {dayTarget.p}P · {dayTarget.f}F · {dayTarget.c}C</small>
+            <span className={`status-pill ${dayTone}`}>Comidas {mealSummaryCount}/3</span>
           </div>
         </div>
 
@@ -1270,8 +1090,7 @@ export default function App() {
             />
           </label>
           <div className="task-card__summary">
-            Totales del dia: {draftTotals.p.toFixed(0)}P · {draftTotals.f.toFixed(0)}F · {draftTotals.c.toFixed(0)}C ·{' '}
-            {draftTotals.kcal.toFixed(0)} kcal
+            Comidas registradas: {mealSummaryCount}/3 · Ejercicios: {completedSet.size}
           </div>
           <button type="button" className="primary" onClick={saveDraft}>
             Guardar día
@@ -1357,165 +1176,172 @@ export default function App() {
     )
   }
 
-  const renderMedidasSemanales = () => (
-    <div className="section">
-      <h2>Medidas semanales</h2>
+  const renderMedidas = () => {
+    const today = formatDateInputValue()
+    const history = [...state.measurements].sort((a, b) => b.date.localeCompare(a.date))
+
+    return (
+      <div className="section">
+        <h2>Medidas</h2>
         <div className="card">
-          <h3>Resumen semanal</h3>
-          <p>Semana {toWeekStart(activeDate)} (promedios y medidas por semana)</p>
-        <div className="split-row">
-          <label>
-            Peso medio (kg)
-            <input
-              type="number"
-              step="0.1"
-              value={weeklyDraft.avgWeightKg ?? ''}
-              onChange={(event) =>
-                updateWeeklyDraft('avgWeightKg', event.target.value ? Number(event.target.value) : undefined)
-              }
-            />
-          </label>
-          <label>
-            Cintura media (cm)
-            <input
-              type="number"
-              step="0.1"
-              value={weeklyDraft.waistCm ?? ''}
-              onChange={(event) =>
-                updateWeeklyDraft('waistCm', event.target.value ? Number(event.target.value) : undefined)
-              }
-            />
-          </label>
-        </div>
-        <div className="split-row">
-          <label>
-            Dolor lumbar promedio (0-10)
-            <input
-              type="number"
-              min={0}
-              max={10}
-              value={weeklyDraft.avgLumbarPain ?? ''}
-              onChange={(event) =>
-                updateWeeklyDraft('avgLumbarPain', event.target.value ? clampPain(Number(event.target.value)) : undefined)
-              }
-            />
-          </label>
-          <label>
-            Pasos promedio
-            <input
-              type="number"
-              value={weeklyDraft.steps ?? ''}
-              onChange={(event) =>
-                updateWeeklyDraft('steps', event.target.value ? Number(event.target.value) : undefined)
-              }
-            />
-          </label>
-        </div>
-        <div className="split-row">
-          <label>
-            Sueño medio (h)
-            <input
-              type="number"
-              step="0.1"
-              value={weeklyDraft.sleepHours ?? ''}
-              onChange={(event) =>
-                updateWeeklyDraft('sleepHours', event.target.value ? Number(event.target.value) : undefined)
-              }
-            />
-          </label>
-        </div>
-      </div>
+          <h3>Registro por fecha</h3>
+          <p>Fecha: {today}</p>
+          <div className="split-row">
+            <label>
+              Peso (kg)
+              <input
+                type="text"
+                inputMode="decimal"
+                pattern="[0-9]*[.,]?[0-9]*"
+                value={measurementDraft.weightKg ?? ''}
+                onChange={(event) =>
+                  updateMeasurementDraft('weightKg', event.target.value ? Number(event.target.value.replace(',', '.')) : undefined)
+                }
+              />
+            </label>
+            <label>
+              Cintura (cm)
+              <input
+                type="text"
+                inputMode="decimal"
+                pattern="[0-9]*[.,]?[0-9]*"
+                value={measurementDraft.waistCm ?? ''}
+                onChange={(event) =>
+                  updateMeasurementDraft('waistCm', event.target.value ? Number(event.target.value.replace(',', '.')) : undefined)
+                }
+              />
+            </label>
+          </div>
 
-      <div className="card">
-        <h3>Medidas complementarias</h3>
-        <div className="split-row">
-          <label>
-            Pecho (cm)
-            <input
-              type="number"
-              step="0.1"
-              value={weeklyDraft.chestCm ?? ''}
-              onChange={(event) =>
-                updateWeeklyDraft('chestCm', event.target.value ? Number(event.target.value) : undefined)
-              }
-            />
-          </label>
-          <label>
-            Hombros (cm)
-            <input
-              type="number"
-              step="0.1"
-              value={weeklyDraft.shouldersCm ?? ''}
-              onChange={(event) =>
-                updateWeeklyDraft('shouldersCm', event.target.value ? Number(event.target.value) : undefined)
-              }
-            />
-          </label>
-        </div>
-        <div className="split-row">
-          <label>
-            Brazo (cm)
-            <input
-              type="number"
-              step="0.1"
-              value={weeklyDraft.armCm ?? ''}
-              onChange={(event) =>
-                updateWeeklyDraft('armCm', event.target.value ? Number(event.target.value) : undefined)
-              }
-            />
-          </label>
-          <label>
-            Cadera (cm)
-            <input
-              type="number"
-              step="0.1"
-              value={weeklyDraft.hipsCm ?? ''}
-              onChange={(event) =>
-                updateWeeklyDraft('hipsCm', event.target.value ? Number(event.target.value) : undefined)
-              }
-            />
-          </label>
-        </div>
-        <button className="primary" type="button" onClick={saveWeekly}>
-          Guardar semana
-        </button>
-      </div>
+          <div className="split-row">
+            <label>
+              Dolor lumbar (0-10)
+              <input
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                value={measurementDraft.lumbarPain ?? ''}
+                onChange={(event) =>
+                  updateMeasurementDraft(
+                    'lumbarPain',
+                    event.target.value ? (clampPain(Number(event.target.value)) as MeasurementEntry['lumbarPain']) : undefined
+                  )
+                }
+              />
+            </label>
+            <label>
+              Pasos
+              <input
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                value={measurementDraft.steps ?? ''}
+                onChange={(event) =>
+                  updateMeasurementDraft('steps', event.target.value ? Number(event.target.value) : undefined)
+                }
+              />
+            </label>
+          </div>
 
-      <div className="card">
-        <h3>Resumen 14 días</h3>
-        <p>
-          Índice de rendimiento reciente: {Math.round(kpis.kpis14.perfIndex * 100)}%
-          {kpis.kpis14.perfIndex > 0 ? ' mejora' : kpis.kpis14.perfIndex < 0 ? ' descenso' : ' estable'}
-        </p>
-        <p>
-          Seguimiento semanal: {state.weeklyMeasurements.length} semanas registradas
-          {state.draftByWeek && Object.keys(state.draftByWeek || {}).length
-            ? ` (${Object.keys(state.draftByWeek || {}).length} borradores)`
-            : ''}
-        </p>
-      </div>
+          <div className="split-row">
+            <label>
+              Sueño (h)
+              <input
+                type="text"
+                inputMode="decimal"
+                pattern="[0-9]*[.,]?[0-9]*"
+                value={measurementDraft.sleepHours ?? ''}
+                onChange={(event) =>
+                  updateMeasurementDraft(
+                    'sleepHours',
+                    event.target.value ? Number(event.target.value.replace(',', '.')) : undefined
+                  )
+                }
+              />
+            </label>
+          </div>
 
-      <div className="card">
-        <h3>Semanas registradas</h3>
-        <ul className="history-list">
-          {[...state.weeklyMeasurements]
-            .sort((a, b) => b.weekStart.localeCompare(a.weekStart))
-            .map((row) => (
+          <div className="split-row">
+            <label>
+              Pecho (cm)
+              <input
+                type="text"
+                inputMode="decimal"
+                pattern="[0-9]*[.,]?[0-9]*"
+                value={measurementDraft.chestCm ?? ''}
+                onChange={(event) =>
+                  updateMeasurementDraft('chestCm', event.target.value ? Number(event.target.value.replace(',', '.')) : undefined)
+                }
+              />
+            </label>
+            <label>
+              Hombros (cm)
+              <input
+                type="text"
+                inputMode="decimal"
+                pattern="[0-9]*[.,]?[0-9]*"
+                value={measurementDraft.shouldersCm ?? ''}
+                onChange={(event) =>
+                  updateMeasurementDraft(
+                    'shouldersCm',
+                    event.target.value ? Number(event.target.value.replace(',', '.')) : undefined
+                  )
+                }
+              />
+            </label>
+          </div>
+
+          <div className="split-row">
+            <label>
+              Brazo (cm)
+              <input
+                type="text"
+                inputMode="decimal"
+                pattern="[0-9]*[.,]?[0-9]*"
+                value={measurementDraft.armCm ?? ''}
+                onChange={(event) =>
+                  updateMeasurementDraft('armCm', event.target.value ? Number(event.target.value.replace(',', '.')) : undefined)
+                }
+              />
+            </label>
+            <label>
+              Cadera (cm)
+              <input
+                type="text"
+                inputMode="decimal"
+                pattern="[0-9]*[.,]?[0-9]*"
+                value={measurementDraft.hipsCm ?? ''}
+                onChange={(event) =>
+                  updateMeasurementDraft('hipsCm', event.target.value ? Number(event.target.value.replace(',', '.')) : undefined)
+                }
+              />
+            </label>
+          </div>
+
+          <button className="primary" type="button" onClick={saveMeasurement}>
+            Guardar medidas
+          </button>
+        </div>
+
+        <div className="card">
+          <h3>Resumen 14 días</h3>
+          <p>
+            Índice de rendimiento reciente: {Math.round(kpis.kpis14.perfIndex * 100)}%
+            {kpis.kpis14.perfIndex > 0 ? ' mejora' : kpis.kpis14.perfIndex < 0 ? ' descenso' : ' estable'}
+          </p>
+          <p>Registros de medidas: {state.measurements.length}</p>
+        </div>
+
+        <div className="card">
+          <h3>Historial de medidas</h3>
+          <ul className="history-list">
+            {history.map((row) => (
               <li key={row.id}>
-                <button
-                  className="link-like"
-                  type="button"
-                  onClick={() => {
-                    setActiveDate(row.weekStart)
-                    setActiveTab('Medidas semanales')
-                  }}
-                >
-                  {row.weekStart}
-                </button>
+                <strong>{row.date}</strong>
                 <div>
-                  peso: {row.avgWeightKg != null ? `${row.avgWeightKg} kg` : '--'} | cintura:{' '}
+                  peso: {row.weightKg != null ? `${row.weightKg} kg` : '--'} | cintura:{' '}
                   {row.waistCm != null ? `${row.waistCm} cm` : '--'} | dolor:{' '}
-                  {row.avgLumbarPain != null ? `${row.avgLumbarPain}` : '--'}
+                  {row.lumbarPain != null ? `${row.lumbarPain}` : '--'}
                 </div>
                 <div>
                   pecho: {row.chestCm != null ? `${row.chestCm} cm` : '--'} | hombros:{' '}
@@ -1525,10 +1351,11 @@ export default function App() {
                 </div>
               </li>
             ))}
-        </ul>
+          </ul>
+        </div>
       </div>
-    </div>
-  )
+    )
+  }
 
   const renderAjustes = () => {
     const notificationLabel = state.settings.notificationsEnabled ? 'Desactivar' : 'Activar'
@@ -1565,9 +1392,8 @@ export default function App() {
         <div className="card">
           <h3>Resumen local</h3>
           <p>Registros: {state.logs.length}</p>
-          <p>Registros semanales: {state.weeklyMeasurements.length}</p>
+          <p>Registros de medidas: {state.measurements.length}</p>
           <p>Borradores diarios: {Object.keys(state.draftByDate || {}).length}</p>
-          <p>Borradores semanales: {Object.keys(state.draftByWeek || {}).length}</p>
           <p>Sincronizacion: 100% local (IndexedDB + localStorage fallback).</p>
           <p>Objetivo de export: revision manual semanal.</p>
         </div>
@@ -1612,7 +1438,7 @@ export default function App() {
         {activeTab === 'Plan y reglas' ? renderPlan() : null}
         {activeTab === 'Hoy' ? renderHoy() : null}
         {activeTab === 'Historico' ? renderHistorico() : null}
-        {activeTab === 'Medidas semanales' ? renderMedidasSemanales() : null}
+        {activeTab === 'Medidas' ? renderMedidas() : null}
         {activeTab === 'Exportar' ? renderAjustes() : null}
       </main>
 

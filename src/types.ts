@@ -35,6 +35,20 @@ export interface WeeklyMeasurement {
   hipsCm?: number
 }
 
+export interface MeasurementEntry {
+  id: string
+  date: string // YYYY-MM-DD
+  weightKg?: number
+  waistCm?: number
+  lumbarPain?: PainLevel
+  steps?: number
+  sleepHours?: number
+  chestCm?: number
+  shouldersCm?: number
+  armCm?: number
+  hipsCm?: number
+}
+
 export interface AppSaveMeta {
   lastSavedAt: number
   schemaVersion: number
@@ -111,6 +125,7 @@ export interface AppState {
   updatedAt: string
   version: number
   logs: DailyLog[]
+  measurements: MeasurementEntry[]
   presets: FoodPreset[]
   exerciseCatalog: ExerciseCatalogItem[]
   draftByDate: Record<string, DailyLog>
