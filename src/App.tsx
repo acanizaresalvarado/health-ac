@@ -79,6 +79,19 @@ type WorkoutDraft = {
   rir: string
 }
 
+type MeasurementField =
+  | 'weightKg'
+  | 'waistCm'
+  | 'lumbarPain'
+  | 'steps'
+  | 'sleepHours'
+  | 'chestCm'
+  | 'shouldersCm'
+  | 'armCm'
+  | 'hipsCm'
+
+type MeasurementForm = Record<MeasurementField, string>
+
 const defaultMealDraft = (): Record<MealName, string> => ({
   desayuno: '',
   comida: '',
@@ -92,6 +105,42 @@ const defaultWorkoutDraft = (fallbackExerciseId: string): WorkoutDraft => ({
   weightKg: '',
   rir: ''
 })
+
+const emptyMeasurementForm = (): MeasurementForm => ({
+  weightKg: '',
+  waistCm: '',
+  lumbarPain: '',
+  steps: '',
+  sleepHours: '',
+  chestCm: '',
+  shouldersCm: '',
+  armCm: '',
+  hipsCm: ''
+})
+
+const toMeasurementForm = (entry: MeasurementEntry): MeasurementForm => ({
+  weightKg: entry.weightKg == null ? '' : String(entry.weightKg),
+  waistCm: entry.waistCm == null ? '' : String(entry.waistCm),
+  lumbarPain: entry.lumbarPain == null ? '' : String(entry.lumbarPain),
+  steps: entry.steps == null ? '' : String(entry.steps),
+  sleepHours: entry.sleepHours == null ? '' : String(entry.sleepHours),
+  chestCm: entry.chestCm == null ? '' : String(entry.chestCm),
+  shouldersCm: entry.shouldersCm == null ? '' : String(entry.shouldersCm),
+  armCm: entry.armCm == null ? '' : String(entry.armCm),
+  hipsCm: entry.hipsCm == null ? '' : String(entry.hipsCm)
+})
+
+const parseDecimalInput = (value: string): number | undefined => {
+  const normalized = value.trim().replace(',', '.')
+  if (!normalized) return undefined
+  const parsed = Number(normalized)
+  return Number.isFinite(parsed) ? parsed : undefined
+}
+
+const isValidDecimalInput = (value: string): boolean => {
+  if (value === '') return true
+  return /^\d*([.,]\d*)?$/.test(value)
+}
 
 const toNumber = (value: string): number => {
   const parsed = Number(value.replace(',', '.'))
@@ -107,6 +156,7 @@ export default function App() {
   const [measurementDraft, setMeasurementDraft] = useState<MeasurementEntry>(
     emptyMeasurementEntry(formatDateInputValue())
   )
+  const [measurementInputs, setMeasurementInputs] = useState<MeasurementForm>(() => emptyMeasurementForm())
   const [mealDrafts, setMealDrafts] = useState<Record<MealName, string>>({
     ...defaultMealDraft()
   })
@@ -188,6 +238,7 @@ export default function App() {
       setState(loadedState)
       setMealDrafts(defaultMealDraft())
       setMeasurementDraft({ ...measurementBase, id: measurementBase.id || uid() })
+      setMeasurementInputs(toMeasurementForm(measurementBase))
       setDraftLog({ ...baseline, adherence: computeDayAdherence(baseline) })
       setWorkoutHistoryExpanded(Boolean(baseline.workout[0]?.sets.length))
       setWorkoutDraft((prev) => ({
@@ -246,7 +297,9 @@ export default function App() {
     if (!loaded || activeTab !== 'Medidas') return
     const today = formatDateInputValue()
     const current = getMeasurementBaseForDate(state, today)
-    setMeasurementDraft((prev) => ({ ...current, id: current.id || prev.id || uid() }))
+    const next = { ...current, id: current.id || uid() }
+    setMeasurementDraft(next)
+    setMeasurementInputs(toMeasurementForm(next))
   }, [loaded, activeTab, state.measurements])
 
   useEffect(() => {
@@ -370,9 +423,11 @@ export default function App() {
     setDraftLog((prev) => ({ ...prev, [field]: value }))
   }
 
-  const updateMeasurementDraft = <K extends keyof MeasurementEntry>(field: K, value: MeasurementEntry[K]) => {
-    const today = formatDateInputValue()
-    setMeasurementDraft((prev) => ({ ...prev, date: today, [field]: value }))
+  const updateMeasurementInput = (field: MeasurementField, value: string) => {
+    if (!isValidDecimalInput(value)) {
+      return
+    }
+    setMeasurementInputs((prev) => ({ ...prev, [field]: value }))
   }
 
   const saveDraft = () => {
@@ -403,11 +458,20 @@ export default function App() {
 
   const saveMeasurement = () => {
     const saveDate = formatDateInputValue()
+    const lumbarPain = parseDecimalInput(measurementInputs.lumbarPain)
     const payload: MeasurementEntry = {
       ...measurementDraft,
       id: measurementDraft.id || uid(),
       date: saveDate,
-      lumbarPain: measurementDraft.lumbarPain == null ? undefined : clampPain(measurementDraft.lumbarPain)
+      weightKg: parseDecimalInput(measurementInputs.weightKg),
+      waistCm: parseDecimalInput(measurementInputs.waistCm),
+      lumbarPain: lumbarPain == null ? undefined : clampPain(lumbarPain),
+      steps: parseDecimalInput(measurementInputs.steps),
+      sleepHours: parseDecimalInput(measurementInputs.sleepHours),
+      chestCm: parseDecimalInput(measurementInputs.chestCm),
+      shouldersCm: parseDecimalInput(measurementInputs.shouldersCm),
+      armCm: parseDecimalInput(measurementInputs.armCm),
+      hipsCm: parseDecimalInput(measurementInputs.hipsCm)
     }
 
     setState((prev) => {
@@ -420,6 +484,7 @@ export default function App() {
     })
 
     setMeasurementDraft(payload)
+    setMeasurementInputs(toMeasurementForm(payload))
     setMessage('Medidas guardadas')
   }
 
@@ -1192,10 +1257,8 @@ export default function App() {
                 type="text"
                 inputMode="decimal"
                 pattern="[0-9]*[.,]?[0-9]*"
-                value={measurementDraft.weightKg ?? ''}
-                onChange={(event) =>
-                  updateMeasurementDraft('weightKg', event.target.value ? Number(event.target.value.replace(',', '.')) : undefined)
-                }
+                value={measurementInputs.weightKg}
+                onChange={(event) => updateMeasurementInput('weightKg', event.target.value)}
               />
             </label>
             <label>
@@ -1204,10 +1267,8 @@ export default function App() {
                 type="text"
                 inputMode="decimal"
                 pattern="[0-9]*[.,]?[0-9]*"
-                value={measurementDraft.waistCm ?? ''}
-                onChange={(event) =>
-                  updateMeasurementDraft('waistCm', event.target.value ? Number(event.target.value.replace(',', '.')) : undefined)
-                }
+                value={measurementInputs.waistCm}
+                onChange={(event) => updateMeasurementInput('waistCm', event.target.value)}
               />
             </label>
           </div>
@@ -1219,13 +1280,8 @@ export default function App() {
                 type="text"
                 inputMode="decimal"
                 pattern="[0-9]*[.,]?[0-9]*"
-                value={measurementDraft.lumbarPain ?? ''}
-                onChange={(event) =>
-                  updateMeasurementDraft(
-                    'lumbarPain',
-                    event.target.value ? clampPain(Number(event.target.value.replace(',', '.'))) : undefined
-                  )
-                }
+                value={measurementInputs.lumbarPain}
+                onChange={(event) => updateMeasurementInput('lumbarPain', event.target.value)}
               />
             </label>
             <label>
@@ -1234,10 +1290,8 @@ export default function App() {
                 type="text"
                 inputMode="decimal"
                 pattern="[0-9]*[.,]?[0-9]*"
-                value={measurementDraft.steps ?? ''}
-                onChange={(event) =>
-                  updateMeasurementDraft('steps', event.target.value ? Number(event.target.value.replace(',', '.')) : undefined)
-                }
+                value={measurementInputs.steps}
+                onChange={(event) => updateMeasurementInput('steps', event.target.value)}
               />
             </label>
           </div>
@@ -1249,13 +1303,8 @@ export default function App() {
                 type="text"
                 inputMode="decimal"
                 pattern="[0-9]*[.,]?[0-9]*"
-                value={measurementDraft.sleepHours ?? ''}
-                onChange={(event) =>
-                  updateMeasurementDraft(
-                    'sleepHours',
-                    event.target.value ? Number(event.target.value.replace(',', '.')) : undefined
-                  )
-                }
+                value={measurementInputs.sleepHours}
+                onChange={(event) => updateMeasurementInput('sleepHours', event.target.value)}
               />
             </label>
           </div>
@@ -1267,10 +1316,8 @@ export default function App() {
                 type="text"
                 inputMode="decimal"
                 pattern="[0-9]*[.,]?[0-9]*"
-                value={measurementDraft.chestCm ?? ''}
-                onChange={(event) =>
-                  updateMeasurementDraft('chestCm', event.target.value ? Number(event.target.value.replace(',', '.')) : undefined)
-                }
+                value={measurementInputs.chestCm}
+                onChange={(event) => updateMeasurementInput('chestCm', event.target.value)}
               />
             </label>
             <label>
@@ -1279,13 +1326,8 @@ export default function App() {
                 type="text"
                 inputMode="decimal"
                 pattern="[0-9]*[.,]?[0-9]*"
-                value={measurementDraft.shouldersCm ?? ''}
-                onChange={(event) =>
-                  updateMeasurementDraft(
-                    'shouldersCm',
-                    event.target.value ? Number(event.target.value.replace(',', '.')) : undefined
-                  )
-                }
+                value={measurementInputs.shouldersCm}
+                onChange={(event) => updateMeasurementInput('shouldersCm', event.target.value)}
               />
             </label>
           </div>
@@ -1297,10 +1339,8 @@ export default function App() {
                 type="text"
                 inputMode="decimal"
                 pattern="[0-9]*[.,]?[0-9]*"
-                value={measurementDraft.armCm ?? ''}
-                onChange={(event) =>
-                  updateMeasurementDraft('armCm', event.target.value ? Number(event.target.value.replace(',', '.')) : undefined)
-                }
+                value={measurementInputs.armCm}
+                onChange={(event) => updateMeasurementInput('armCm', event.target.value)}
               />
             </label>
             <label>
@@ -1309,10 +1349,8 @@ export default function App() {
                 type="text"
                 inputMode="decimal"
                 pattern="[0-9]*[.,]?[0-9]*"
-                value={measurementDraft.hipsCm ?? ''}
-                onChange={(event) =>
-                  updateMeasurementDraft('hipsCm', event.target.value ? Number(event.target.value.replace(',', '.')) : undefined)
-                }
+                value={measurementInputs.hipsCm}
+                onChange={(event) => updateMeasurementInput('hipsCm', event.target.value)}
               />
             </label>
           </div>
