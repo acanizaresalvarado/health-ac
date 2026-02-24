@@ -407,8 +407,7 @@ export default function App() {
       ...measurementDraft,
       id: measurementDraft.id || uid(),
       date: saveDate,
-      lumbarPain:
-        measurementDraft.lumbarPain == null ? undefined : (clampPain(measurementDraft.lumbarPain) as MeasurementEntry['lumbarPain'])
+      lumbarPain: measurementDraft.lumbarPain == null ? undefined : clampPain(measurementDraft.lumbarPain)
     }
 
     setState((prev) => {
@@ -1218,13 +1217,13 @@ export default function App() {
               Dolor lumbar (0-10)
               <input
                 type="text"
-                inputMode="numeric"
-                pattern="[0-9]*"
+                inputMode="decimal"
+                pattern="[0-9]*[.,]?[0-9]*"
                 value={measurementDraft.lumbarPain ?? ''}
                 onChange={(event) =>
                   updateMeasurementDraft(
                     'lumbarPain',
-                    event.target.value ? (clampPain(Number(event.target.value)) as MeasurementEntry['lumbarPain']) : undefined
+                    event.target.value ? clampPain(Number(event.target.value.replace(',', '.'))) : undefined
                   )
                 }
               />
@@ -1233,11 +1232,11 @@ export default function App() {
               Pasos
               <input
                 type="text"
-                inputMode="numeric"
-                pattern="[0-9]*"
+                inputMode="decimal"
+                pattern="[0-9]*[.,]?[0-9]*"
                 value={measurementDraft.steps ?? ''}
                 onChange={(event) =>
-                  updateMeasurementDraft('steps', event.target.value ? Number(event.target.value) : undefined)
+                  updateMeasurementDraft('steps', event.target.value ? Number(event.target.value.replace(',', '.')) : undefined)
                 }
               />
             </label>
@@ -1482,5 +1481,5 @@ function getNextReminder(
 
 function clampPain(value: number): number {
   if (Number.isNaN(value)) return 0
-  return Math.min(10, Math.max(0, Math.round(value)))
+  return Math.min(10, Math.max(0, value))
 }

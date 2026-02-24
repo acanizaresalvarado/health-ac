@@ -40,7 +40,7 @@ export interface MeasurementEntry {
   date: string // YYYY-MM-DD
   weightKg?: number
   waistCm?: number
-  lumbarPain?: PainLevel
+  lumbarPain?: number
   steps?: number
   sleepHours?: number
   chestCm?: number
