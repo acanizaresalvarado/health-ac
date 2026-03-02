@@ -1,8 +1,13 @@
-import { CoreExerciseId, ExerciseCatalogItem, FoodPreset, MealName, TrainingDayType } from './types'
+import {
+  CoreExerciseId,
+  ExerciseCatalogItem,
+  Objective,
+  TrainingTemplateDay
+} from './types'
 
 export const CORE_EXERCISE_LABELS: Record<CoreExerciseId, string> = {
   jalon: 'Jalon al pecho',
-  remo: 'Remo cable / maquina',
+  remo: 'Remo cable o maquina',
   laterales: 'Elevaciones laterales',
   press_inclinado: 'Press inclinado'
 }
@@ -14,11 +19,11 @@ export const DEFAULT_EXERCISE_CATALOG: ExerciseCatalogItem[] = [
   { id: 'remo', name: CORE_EXERCISE_LABELS.remo, isCore: true, coreId: 'remo' },
   { id: 'laterales', name: CORE_EXERCISE_LABELS.laterales, isCore: true, coreId: 'laterales' },
   { id: 'press_inclinado', name: CORE_EXERCISE_LABELS.press_inclinado, isCore: true, coreId: 'press_inclinado' },
-  { id: 'press_pecho_maquina', name: 'Press pecho máquina', isCore: false },
+  { id: 'press_pecho_maquina', name: 'Press pecho maquina', isCore: false },
   { id: 'prensa', name: 'Prensa', isCore: false },
   { id: 'pallof', name: 'Pallof press', isCore: false },
   { id: 'hip_thrust', name: 'Hip thrust', isCore: false },
-  { id: 'extension_cuadriceps', name: 'Extensión cuádriceps', isCore: false },
+  { id: 'extension_cuadriceps', name: 'Extension cuadriceps', isCore: false },
   { id: 'face_pulls', name: 'Face pulls', isCore: false },
   { id: 'dead_bug', name: 'Dead bug', isCore: false },
   { id: 'hack_squat', name: 'Hack squat', isCore: false },
@@ -28,85 +33,100 @@ export const DEFAULT_EXERCISE_CATALOG: ExerciseCatalogItem[] = [
   { id: 'farmer_carry', name: 'Farmer carry', isCore: false }
 ]
 
-export const WORKOUT_DAY_EXERCISES = {
-  A: ['press_pecho_maquina', 'remo', 'jalon', 'prensa', 'laterales', 'pallof'],
-  B: ['jalon', 'remo', 'hip_thrust', 'extension_cuadriceps', 'face_pulls', 'dead_bug', 'laterales'],
-  C: ['press_inclinado', 'remo', 'hack_squat', 'abductores', 'curl_femoral', 'rkc', 'farmer_carry']
-} as const
+const templateExercise = (
+  exerciseId: string,
+  name: string,
+  order: number,
+  targetSets?: number,
+  repRange?: string,
+  rirRange?: string,
+  notes?: string
+) => ({
+  exerciseId,
+  name,
+  order,
+  targetSets,
+  repRange,
+  rirRange,
+  notes
+})
 
-export const WORKOUT_DAY_OPTIONS = {
-  A: 'Día A',
-  B: 'Día B',
-  C: 'Día C'
-} as const
-
-export type WorkoutDay = keyof typeof WORKOUT_DAY_EXERCISES
-
-export const DAY_TARGETS: Record<TrainingDayType, { kcal: number; p: number; f: number; c: number }> = {
-  gym: { kcal: 2200, p: 150, f: 60, c: 250 },
-  nogym: { kcal: 2000, p: 150, f: 70, c: 170 }
-}
-
-export const MEAL_TARGETS: Record<MealName, { p: number; f: number; c: number; kcal: number }> = {
-  desayuno: { p: 45, f: 20, c: 70, kcal: 650 },
-  comida: { p: 45, f: 20, c: 80, kcal: 700 },
-  cena: { p: 60, f: 20, c: 100, kcal: 850 }
-}
-
-export const DEFAULT_PRESETS: FoodPreset[] = [
+export const DEFAULT_TRAINING_TEMPLATES: TrainingTemplateDay[] = [
   {
-    id: 'preset_egg',
-    name: 'Huevo entero',
-    pPer100g: 12.6,
-    fPer100g: 10.0,
-    cPer100g: 1.1,
-    kcalPer100g: 143
+    id: 'A',
+    label: 'Dia A',
+    exercises: [
+      templateExercise('press_pecho_maquina', 'Press pecho maquina', 1, 3, '6-10', '1-3'),
+      templateExercise('remo', CORE_EXERCISE_LABELS.remo, 2, 4, '8-12', '1-3'),
+      templateExercise('jalon', CORE_EXERCISE_LABELS.jalon, 3, 3, '8-12', '1-3'),
+      templateExercise('prensa', 'Prensa', 4, 3, '8-12', '1-3'),
+      templateExercise('laterales', CORE_EXERCISE_LABELS.laterales, 5, 4, '12-20', '0-2'),
+      templateExercise('pallof', 'Pallof press', 6, 3, '10-12', '2-3')
+    ]
   },
   {
-    id: 'preset_chicken',
-    name: 'Pechuga pollo cocida',
-    pPer100g: 31.0,
-    fPer100g: 3.6,
-    cPer100g: 0,
-    kcalPer100g: 165
+    id: 'B',
+    label: 'Dia B',
+    exercises: [
+      templateExercise('jalon', CORE_EXERCISE_LABELS.jalon, 1, 4, '8-12', '1-3'),
+      templateExercise('remo', CORE_EXERCISE_LABELS.remo, 2, 3, '8-12', '1-3'),
+      templateExercise('hip_thrust', 'Hip thrust', 3, 4, '8-12', '1-3'),
+      templateExercise('extension_cuadriceps', 'Extension cuadriceps', 4, 3, '12-15', '1-2'),
+      templateExercise('face_pulls', 'Face pulls', 5, 3, '12-15', '1-2'),
+      templateExercise('dead_bug', 'Dead bug', 6, 3, '8-12', '2-3'),
+      templateExercise('laterales', CORE_EXERCISE_LABELS.laterales, 7, 2, '15-20', '0-2')
+    ]
   },
   {
-    id: 'preset_rice',
-    name: 'Arroz blanco cocido',
-    pPer100g: 2.7,
-    fPer100g: 0.3,
-    cPer100g: 28.2,
-    kcalPer100g: 130
+    id: 'C',
+    label: 'Dia C',
+    exercises: [
+      templateExercise('press_inclinado', CORE_EXERCISE_LABELS.press_inclinado, 1, 3, '8-12', '1-3'),
+      templateExercise('remo', CORE_EXERCISE_LABELS.remo, 2, 3, '8-12', '1-3'),
+      templateExercise('hack_squat', 'Hack squat', 3, 3, '8-12', '1-3'),
+      templateExercise('abductores', 'Abductores', 4, 3, '12-20', '1-2'),
+      templateExercise('curl_femoral', 'Curl femoral', 5, 3, '10-12', '1-3'),
+      templateExercise('rkc', 'RKC 20-40s', 6, 4, '20-40s', '2-3'),
+      templateExercise('farmer_carry', 'Farmer carry', 7, 5, '40-60m', '2-3')
+    ]
   },
   {
-    id: 'preset_oats',
-    name: 'Avena',
-    pPer100g: 16.9,
-    fPer100g: 6.9,
-    cPer100g: 66.3,
-    kcalPer100g: 389
+    id: 'CUSTOM',
+    label: 'Dia libre',
+    exercises: []
+  }
+]
+
+const nowIso = () => new Date().toISOString()
+
+export const DEFAULT_OBJECTIVES: Objective[] = [
+  {
+    id: 'objective_waist',
+    title: 'Bajar cintura a 84-85 cm',
+    metric: 'waist',
+    targetValue: 85,
+    unit: 'cm',
+    status: 'active',
+    notes: 'Prioridad visual principal de la fase actual.',
+    createdAt: nowIso(),
+    updatedAt: nowIso()
   },
   {
-    id: 'preset_whey',
-    name: 'Proteina whey (1 scoop)',
-    pPer100g: 80,
-    fPer100g: 6,
-    cPer100g: 8,
-    kcalPer100g: 400
-  },
-  {
-    id: 'preset_olive_oil',
-    name: 'Aceite de oliva',
-    pPer100g: 0,
-    fPer100g: 100,
-    cPer100g: 0,
-    kcalPer100g: 884
+    id: 'objective_consistency',
+    title: 'Minimo 3 sesiones por semana',
+    metric: 'consistency',
+    targetValue: 3,
+    unit: 'sessions',
+    status: 'active',
+    notes: 'Mantener consistencia antes de aumentar volumen.',
+    createdAt: nowIso(),
+    updatedAt: nowIso()
   }
 ]
 
 export const REMINDER_TIMES = [
-  { key: 'desayuno', label: 'Registro de desayuno', hour: 9, minute: 0, dayOfWeek: null as number | null },
-  { key: 'comida', label: 'Registro de comida', hour: 14, minute: 0, dayOfWeek: null as number | null },
-  { key: 'cena', label: 'Cerrar registro', hour: 22, minute: 0, dayOfWeek: null as number | null },
-  { key: 'revision', label: 'Revision quincenal', hour: 20, minute: 0, dayOfWeek: 5 as number }
+  { key: 'workout', label: 'Registro de entrenamiento', hour: 20, minute: 30, dayOfWeek: null as number | null },
+  { key: 'review', label: 'Revision semanal de progreso', hour: 19, minute: 0, dayOfWeek: 0 as number }
 ]
+
+export const TEMPLATE_DAY_IDS: Array<TrainingTemplateDay['id']> = ['A', 'B', 'C', 'CUSTOM']

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'health-tracker-v1.1'
+const CACHE_NAME = 'health-tracker-v2.0'
 const APP_SHELL = ['./', './manifest.webmanifest', './icon.svg']
 
 self.addEventListener('install', (event) => {
@@ -7,7 +7,7 @@ self.addEventListener('install', (event) => {
 })
 
 self.addEventListener('message', (event) => {
-  if ((event.data && typeof event.data === 'object' && event.data.type === 'SKIP_WAITING')) {
+  if (event.data && typeof event.data === 'object' && event.data.type === 'SKIP_WAITING') {
     self.skipWaiting()
   }
 })
@@ -15,11 +15,7 @@ self.addEventListener('message', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) =>
-      Promise.all(
-        keys
-          .filter((key) => key !== CACHE_NAME)
-          .map((oldKey) => caches.delete(oldKey))
-      )
+      Promise.all(keys.filter((key) => key !== CACHE_NAME).map((oldKey) => caches.delete(oldKey)))
     )
   )
   self.clients.claim()
@@ -29,11 +25,23 @@ self.addEventListener('fetch', (event) => {
   const request = event.request
   if (request.method !== 'GET') return
 
+  if (request.mode === 'navigate') {
+    event.respondWith(
+      fetch(request)
+        .then((response) => {
+          const clone = response.clone()
+          caches.open(CACHE_NAME).then((cache) => cache.put(request, clone))
+          return response
+        })
+        .catch(() => caches.match(request).then((cached) => cached || caches.match('./')))
+    )
+    return
+  }
+
   event.respondWith(
     caches.match(request).then((cachedResponse) => {
-      if (cachedResponse) {
-        return cachedResponse
-      }
+      if (cachedResponse) return cachedResponse
+
       return fetch(request).then((response) => {
         if (response && response.status === 200) {
           const clone = response.clone()

@@ -1,9 +1,10 @@
-export type TrainingDayType = 'gym' | 'nogym'
-export type PainLevel = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10
-export type MealName = 'desayuno' | 'comida' | 'cena'
-export type CoreExerciseId = 'jalon' | 'remo' | 'laterales' | 'press_inclinado'
+export type AppSchemaVersion = 6
 
-export type ExerciseKey = CoreExerciseId
+export type ObjectiveMetric = 'waist' | 'weight' | 'strength' | 'consistency' | 'custom'
+export type ObjectiveUnit = 'kg' | 'cm' | '%' | 'sessions' | 'custom'
+export type ObjectiveStatus = 'active' | 'paused' | 'done'
+
+export type CoreExerciseId = 'jalon' | 'remo' | 'laterales' | 'press_inclinado'
 
 export interface ExerciseCatalogItem {
   id: string
@@ -12,32 +13,58 @@ export interface ExerciseCatalogItem {
   coreId?: CoreExerciseId
 }
 
-export interface FoodPreset {
+export interface Objective {
   id: string
-  name: string
-  pPer100g: number
-  fPer100g: number
-  cPer100g: number
-  kcalPer100g: number
+  title: string
+  metric: ObjectiveMetric
+  targetValue?: number
+  unit?: ObjectiveUnit
+  deadline?: string // YYYY-MM-DD local date
+  status: ObjectiveStatus
+  notes?: string
+  createdAt: string
+  updatedAt: string
 }
 
-export interface WeeklyMeasurement {
+export interface TemplateExercise {
+  exerciseId: string
+  name: string
+  targetSets?: number
+  repRange?: string
+  rirRange?: string
+  notes?: string
+  order: number
+}
+
+export interface TrainingTemplateDay {
+  id: 'A' | 'B' | 'C' | 'CUSTOM'
+  label: string
+  exercises: TemplateExercise[]
+}
+
+export interface WorkoutSetLog {
   id: string
-  weekStart: string
-  avgWeightKg?: number
-  waistCm?: number
-  avgLumbarPain?: number
-  steps?: number
-  sleepHours?: number
-  chestCm?: number
-  shouldersCm?: number
-  armCm?: number
-  hipsCm?: number
+  exerciseId: string
+  setNumber: number
+  reps: number
+  weightKg: number
+  rir?: number
+  isWarmup: boolean
+}
+
+export interface WorkoutSessionLog {
+  id: string
+  date: string // YYYY-MM-DD local date
+  templateDayId: string
+  notes?: string
+  sets: WorkoutSetLog[]
+  createdAt: string
+  updatedAt: string
 }
 
 export interface MeasurementEntry {
   id: string
-  date: string // YYYY-MM-DD
+  date: string // YYYY-MM-DD local date
   weightKg?: number
   waistCm?: number
   lumbarPain?: number
@@ -51,69 +78,9 @@ export interface MeasurementEntry {
 
 export interface AppSaveMeta {
   lastSavedAt: number
-  schemaVersion: number
+  schemaVersion: AppSchemaVersion
   deviceId?: string
   lastSavedWithFallback?: boolean
-}
-
-export interface MealItem {
-  id: string
-  dayId: string
-  meal: MealName
-  presetId?: string
-  grams: number
-  p: number
-  f: number
-  c: number
-  kcal: number
-  source: 'preset' | 'manual'
-  notes?: string
-}
-
-export interface WorkoutSet {
-  exerciseId: string
-  sets: number
-  reps: number
-  weightKg: number
-  rir?: number
-  exercise?: CoreExerciseId
-}
-
-export interface WorkoutSession {
-  id: string
-  dayId: string
-  durationMin?: number
-  sets: WorkoutSet[]
-}
-
-export interface DailyLog {
-  id: string
-  date: string // YYYY-MM-DD
-  dayType: TrainingDayType
-  weightKg?: number
-  waistCm?: number
-  lumbarPain: PainLevel
-  sleepHours?: number
-  steps?: number
-  note?: string
-  meals: MealItem[]
-  workout: WorkoutSession[]
-  adherence: {
-    nutritionPercent: number
-    kpiFlags: string[]
-  }
-}
-
-export interface WeeklyKPI {
-  weekStart: string
-  avgWeightKg: number
-  waistCm?: number
-  waistTrendCm?: number
-  lumbarAvg: number
-  topPain?: PainLevel
-  nutritionAdherence: number
-  perfImprovementIndex: number
-  autoDecision?: 'none' | 'down150kcal' | 'up125kcal' | 'deload'
 }
 
 export interface AppSettings {
@@ -123,14 +90,13 @@ export interface AppSettings {
 export interface AppState {
   createdAt: string
   updatedAt: string
-  version: number
-  logs: DailyLog[]
+  version: AppSchemaVersion
+  sessions: WorkoutSessionLog[]
   measurements: MeasurementEntry[]
-  presets: FoodPreset[]
+  objectives: Objective[]
+  trainingTemplates: TrainingTemplateDay[]
   exerciseCatalog: ExerciseCatalogItem[]
-  draftByDate: Record<string, DailyLog>
-  weeklyMeasurements: WeeklyMeasurement[]
-  draftByWeek: Record<string, WeeklyMeasurement>
   settings: AppSettings
+  draftByDate: Record<string, WorkoutSessionLog>
   meta: AppSaveMeta
 }

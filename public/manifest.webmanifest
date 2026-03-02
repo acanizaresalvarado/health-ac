@@ -1,12 +1,12 @@
 {
-  "name": "Health Tracker 2026",
-  "short_name": "Health2026",
-  "description": "PWA local-first de seguimiento fisico.",
+  "name": "Health Tracker Pro",
+  "short_name": "HealthPro",
+  "description": "App local-first para progreso de entrenamiento, fuerza y medidas.",
   "start_url": "/health-ac/",
   "scope": "/health-ac/",
   "display": "standalone",
-  "background_color": "#0f172a",
-  "theme_color": "#0f172a",
+  "background_color": "#050816",
+  "theme_color": "#050816",
   "orientation": "portrait",
   "icons": [
     {
