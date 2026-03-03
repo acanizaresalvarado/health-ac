@@ -6,11 +6,14 @@ type WorkoutTabProps = {
   sessionDate: string
   onSessionDateChange: (date: string) => void
   sessionDraft: WorkoutSessionLog
+  hasSavedSession: boolean
+  hasUnsavedChanges: boolean
   allSessions: WorkoutSessionLog[]
   templates: TrainingTemplateDay[]
   exerciseCatalog: ExerciseCatalogItem[]
   onSessionDraftChange: (session: WorkoutSessionLog) => void
   onSaveSession: (session: WorkoutSessionLog) => void
+  onDeleteSession: () => void
   onAddExercise: (exercise: ExerciseCatalogItem) => void
 }
 
@@ -35,11 +38,14 @@ export function WorkoutTab({
   sessionDate,
   onSessionDateChange,
   sessionDraft,
+  hasSavedSession,
+  hasUnsavedChanges,
   allSessions,
   templates,
   exerciseCatalog,
   onSessionDraftChange,
   onSaveSession,
+  onDeleteSession,
   onAddExercise
 }: WorkoutTabProps) {
   const [exerciseId, setExerciseId] = useState('')
@@ -208,6 +214,13 @@ export function WorkoutTab({
         <h2>Entreno</h2>
         <p className="muted">Registro por serie con foco en progresion real</p>
       </div>
+
+      {hasUnsavedChanges ? (
+        <div className="card">
+          <strong>Cambios sin guardar</strong>
+          <p className="muted">Pulsa "Guardar sesion" para persistir y sincronizar en Google Sheets.</p>
+        </div>
+      ) : null}
 
       <div className="card">
         <div className="split-row">
@@ -413,9 +426,14 @@ export function WorkoutTab({
           </div>
         </div>
 
-        <button type="button" className="primary" onClick={() => onSaveSession(sessionDraft)}>
-          Guardar sesion
-        </button>
+        <div className="button-row">
+          <button type="button" className="primary" onClick={() => onSaveSession(sessionDraft)}>
+            Guardar sesion
+          </button>
+          <button type="button" className="remove-button" onClick={onDeleteSession} disabled={!hasSavedSession}>
+            Borrar sesion del dia
+          </button>
+        </div>
       </div>
     </div>
   )

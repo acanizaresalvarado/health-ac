@@ -12,7 +12,7 @@ const notifyUpdate = (registration: ServiceWorkerRegistration) => {
   window.dispatchEvent(new CustomEvent(SW_UPDATE_EVENT, { detail: { registration } }))
 }
 
-if ('serviceWorker' in navigator) {
+if (import.meta.env.PROD && 'serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker
       .register(`${import.meta.env.BASE_URL}sw.js`)

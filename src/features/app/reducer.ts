@@ -3,6 +3,7 @@ import {
   ExerciseCatalogItem,
   MeasurementEntry,
   Objective,
+  SheetsSyncSettings,
   TrainingTemplateDay,
   WorkoutSessionLog
 } from '../../types'
@@ -37,6 +38,7 @@ const withUpdatedAt = (state: AppState): AppState => ({
 export type AppAction =
   | { type: 'replace_state'; state: AppState }
   | { type: 'upsert_session'; session: WorkoutSessionLog; clearDraft?: boolean }
+  | { type: 'delete_session'; sessionId: string; date: string }
   | { type: 'upsert_draft'; date: string; session: WorkoutSessionLog }
   | { type: 'clear_draft'; date: string }
   | { type: 'upsert_measurement'; measurement: MeasurementEntry }
@@ -46,6 +48,7 @@ export type AppAction =
   | { type: 'upsert_exercise'; exercise: ExerciseCatalogItem }
   | { type: 'merge_import'; incoming: AppState }
   | { type: 'set_notifications'; enabled: boolean }
+  | { type: 'update_sheets_sync'; patch: Partial<SheetsSyncSettings> }
 
 export function appReducer(state: AppState, action: AppAction): AppState {
   switch (action.type) {
@@ -58,7 +61,12 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       if (index >= 0) {
         next[index] = action.session
       } else {
-        next.push(action.session)
+        const byDateIndex = next.findIndex((session) => session.date === action.session.date)
+        if (byDateIndex >= 0) {
+          next[byDateIndex] = action.session
+        } else {
+          next.push(action.session)
+        }
       }
 
       const nextState: AppState = {
@@ -72,6 +80,14 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       }
 
       return withUpdatedAt(nextState)
+    }
+
+    case 'delete_session': {
+      return withUpdatedAt({
+        ...state,
+        sessions: state.sessions.filter((session) => session.id !== action.sessionId),
+        draftByDate: Object.fromEntries(Object.entries(state.draftByDate).filter(([date]) => date !== action.date))
+      })
     }
 
     case 'upsert_draft': {
@@ -163,6 +179,19 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         settings: {
           ...state.settings,
           notificationsEnabled: action.enabled
+        }
+      })
+    }
+
+    case 'update_sheets_sync': {
+      return withUpdatedAt({
+        ...state,
+        settings: {
+          ...state.settings,
+          sheetsSync: {
+            ...state.settings.sheetsSync,
+            ...action.patch
+          }
         }
       })
     }

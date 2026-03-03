@@ -23,6 +23,12 @@ const STORE_NAME = 'state'
 const STORAGE_VERSION: AppSchemaVersion = 6
 const SAVE_DEBOUNCE_MS = 500
 const DEVICE_ID_KEY = 'health-tracker-device-id'
+const BASE_URL = (import.meta.env.BASE_URL as string | undefined) || '/'
+const BASE_NORMALIZED = BASE_URL.endsWith('/') ? BASE_URL.slice(0, -1) : BASE_URL
+const BASE_AWARE_DEFAULT_SYNC_ENDPOINT = `${BASE_NORMALIZED}/api/sheets-sync`.replace(/\/{2,}/g, '/')
+const DEFAULT_BACKEND_SYNC_ENDPOINT = (
+  (import.meta.env.VITE_SYNC_API_ENDPOINT as string | undefined) || BASE_AWARE_DEFAULT_SYNC_ENDPOINT
+).trim()
 
 export type StorageSaveResult = {
   usedFallback: boolean
@@ -62,7 +68,18 @@ type LegacyState = {
   measurements?: MeasurementEntry[]
   exerciseCatalog?: ExerciseCatalogItem[]
   draftByDate?: Record<string, LegacyDailyLog>
-  settings?: { notificationsEnabled?: boolean }
+  settings?: {
+    notificationsEnabled?: boolean
+    sheetsSync?: {
+      enabled?: boolean
+      mode?: 'backend_proxy' | 'direct_webhook'
+      endpointUrl?: string
+      autoSyncOnSave?: boolean
+      lastSyncAt?: string
+      lastSyncStatus?: 'idle' | 'syncing' | 'success' | 'error'
+      lastSyncError?: string
+    }
+  }
   meta?: Partial<AppSaveMeta>
 }
 
@@ -114,6 +131,32 @@ function normalizeMeta(rawMeta: Partial<AppSaveMeta> | undefined): AppSaveMeta {
     schemaVersion: STORAGE_VERSION,
     deviceId: rawMeta?.deviceId || getDeviceId(),
     lastSavedWithFallback: rawMeta?.lastSavedWithFallback
+  }
+}
+
+function normalizeSheetsSyncSettings(raw: unknown): AppState['settings']['sheetsSync'] {
+  const value = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {}
+  const status = value.lastSyncStatus
+  const mode = value.mode
+  const endpoint = typeof value.endpointUrl === 'string' ? value.endpointUrl.trim() : ''
+  const inferredMode =
+    mode === 'direct_webhook' || mode === 'backend_proxy'
+      ? mode
+      : endpoint.includes('script.google.com/macros')
+        ? 'direct_webhook'
+        : 'backend_proxy'
+  const normalizedEndpoint =
+    endpoint === '/api/sheets-sync' && inferredMode === 'backend_proxy' ? DEFAULT_BACKEND_SYNC_ENDPOINT : endpoint
+
+  return {
+    enabled: typeof value.enabled === 'boolean' ? value.enabled : true,
+    mode: inferredMode,
+    endpointUrl: normalizedEndpoint || (inferredMode === 'backend_proxy' ? DEFAULT_BACKEND_SYNC_ENDPOINT : ''),
+    autoSyncOnSave: typeof value.autoSyncOnSave === 'boolean' ? value.autoSyncOnSave : true,
+    lastSyncAt: typeof value.lastSyncAt === 'string' ? value.lastSyncAt : undefined,
+    lastSyncStatus:
+      status === 'idle' || status === 'syncing' || status === 'success' || status === 'error' ? status : 'idle',
+    lastSyncError: typeof value.lastSyncError === 'string' ? value.lastSyncError : undefined
   }
 }
 
@@ -494,7 +537,8 @@ function migrateLegacyState(raw: LegacyState): AppState {
     trainingTemplates: normalizeTrainingTemplates(undefined, exerciseCatalog),
     exerciseCatalog,
     settings: {
-      notificationsEnabled: Boolean(raw.settings?.notificationsEnabled)
+      notificationsEnabled: Boolean(raw.settings?.notificationsEnabled),
+      sheetsSync: normalizeSheetsSyncSettings(raw.settings?.sheetsSync)
     },
     draftByDate,
     meta: normalizeMeta(raw.meta)
@@ -537,7 +581,8 @@ function normalizeV6State(input: Partial<AppState> | null): AppState {
     trainingTemplates: normalizeTrainingTemplates(input?.trainingTemplates, exerciseCatalog),
     exerciseCatalog,
     settings: {
-      notificationsEnabled: Boolean(input?.settings?.notificationsEnabled)
+      notificationsEnabled: Boolean(input?.settings?.notificationsEnabled),
+      sheetsSync: normalizeSheetsSyncSettings(input?.settings?.sheetsSync)
     },
     draftByDate: normalizeDrafts(input?.draftByDate),
     meta: normalizeMeta(input?.meta)
@@ -797,7 +842,10 @@ export function getDefaultState(): AppState {
       exercises: [...template.exercises]
     })),
     exerciseCatalog: DEFAULT_EXERCISE_CATALOG,
-    settings: { notificationsEnabled: false },
+    settings: {
+      notificationsEnabled: false,
+      sheetsSync: normalizeSheetsSyncSettings(undefined)
+    },
     draftByDate: {
       [formatDateInputValue()]: createEmptySession(formatDateInputValue(), 'A')
     },

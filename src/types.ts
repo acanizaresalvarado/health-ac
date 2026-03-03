@@ -1,4 +1,8 @@
 export type AppSchemaVersion = 6
+export type SyncEntity = 'sessions' | 'sets' | 'measurements' | 'objectives' | 'templates'
+export type SyncOperation = 'upsert'
+export type SheetsSyncStatus = 'idle' | 'syncing' | 'success' | 'error'
+export type SheetsSyncMode = 'backend_proxy' | 'direct_webhook'
 
 export type ObjectiveMetric = 'waist' | 'weight' | 'strength' | 'consistency' | 'custom'
 export type ObjectiveUnit = 'kg' | 'cm' | '%' | 'sessions' | 'custom'
@@ -83,8 +87,57 @@ export interface AppSaveMeta {
   lastSavedWithFallback?: boolean
 }
 
+export interface SheetsSyncSettings {
+  enabled: boolean
+  mode: SheetsSyncMode
+  endpointUrl: string
+  autoSyncOnSave: boolean
+  lastSyncAt?: string
+  lastSyncStatus?: SheetsSyncStatus
+  lastSyncError?: string
+}
+
 export interface AppSettings {
   notificationsEnabled: boolean
+  sheetsSync: SheetsSyncSettings
+}
+
+export interface SyncQueueItemInput {
+  entity: SyncEntity
+  key: string
+  op?: SyncOperation
+  data: Record<string, unknown>
+  updatedAt?: string
+}
+
+export interface SyncQueueItem {
+  id: string
+  entity: SyncEntity
+  key: string
+  op: SyncOperation
+  data: Record<string, unknown>
+  createdAt: string
+  updatedAt: string
+  attempts: number
+  nextRetryAt: number
+  lastError?: string
+}
+
+export interface SheetsSyncEnvelopeItem {
+  entity: SyncEntity
+  key: string
+  op: SyncOperation
+  updatedAt: string
+  data: Record<string, unknown>
+}
+
+export interface SheetsSyncEnvelope {
+  source: 'health-tracker-pwa'
+  schemaVersion: AppSchemaVersion
+  generatedAt: string
+  deviceId?: string
+  token?: string
+  items: SheetsSyncEnvelopeItem[]
 }
 
 export interface AppState {

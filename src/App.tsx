@@ -29,7 +29,30 @@ import {
   safeSaveDebounced,
   StorageSaveResult
 } from './utils/storage'
-import { MeasurementEntry, Objective, TrainingTemplateDay, WorkoutSessionLog } from './types'
+import {
+  clearSheetsSyncToken,
+  enqueueSyncRows,
+  getSyncQueueSize,
+  hasSheetsSyncToken,
+  setSheetsSyncToken,
+  syncNow,
+  toSyncRowsFromMeasurement,
+  toSyncRowsFromObjective,
+  toSyncRowsFromSession,
+  toSyncRowsFromTemplate,
+  toSoftDeleteRowsFromSession,
+  toSoftDeleteRowsFromSets
+} from './utils/sheetsSync'
+import { saveQueue } from './utils/syncQueue'
+import {
+  MeasurementEntry,
+  Objective,
+  SheetsSyncSettings,
+  SyncQueueItemInput,
+  TrainingTemplateDay,
+  WorkoutSetLog,
+  WorkoutSessionLog
+} from './types'
 
 const TABS = ['Dashboard', 'Entreno', 'Medidas', 'Plan', 'Exportar'] as const
 type Tab = (typeof TABS)[number]
@@ -70,6 +93,49 @@ function getNextReminder(
   return target
 }
 
+function getLatestSessionForDate(sessions: WorkoutSessionLog[], date: string): WorkoutSessionLog | null {
+  const found = sessions
+    .filter((session) => session.date === date)
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0]
+
+  return found || null
+}
+
+function normalizeComparableSet(set: WorkoutSetLog) {
+  return {
+    id: set.id,
+    exerciseId: set.exerciseId,
+    setNumber: set.setNumber,
+    reps: set.reps,
+    weightKg: set.weightKg,
+    rir: set.rir ?? null,
+    isWarmup: Boolean(set.isWarmup)
+  }
+}
+
+function buildComparableSession(session: WorkoutSessionLog | null) {
+  if (!session) return null
+  return {
+    date: session.date,
+    templateDayId: session.templateDayId,
+    notes: session.notes || '',
+    sets: [...session.sets]
+      .sort((a, b) => {
+        if (a.exerciseId === b.exerciseId) return a.setNumber - b.setNumber
+        return a.exerciseId.localeCompare(b.exerciseId)
+      })
+      .map(normalizeComparableSet)
+  }
+}
+
+function hasSessionChanges(draft: WorkoutSessionLog, saved: WorkoutSessionLog | null): boolean {
+  if (!saved) {
+    return Boolean(draft.sets.length || (draft.notes || '').trim())
+  }
+
+  return JSON.stringify(buildComparableSession(draft)) !== JSON.stringify(buildComparableSession(saved))
+}
+
 export default function App() {
   const [state, dispatch] = useReducer(appReducer, getDefaultState())
   const [loaded, setLoaded] = useState(false)
@@ -84,6 +150,8 @@ export default function App() {
   const [message, setMessage] = useState('')
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle')
   const [updateAvailable, setUpdateAvailable] = useState(false)
+  const [syncQueueSize, setSyncQueueSize] = useState(0)
+  const [hasSyncToken, setHasSyncToken] = useState(false)
 
   const timers = useRef<number[]>([])
   const saveStatusTimer = useRef<number | null>(null)
@@ -103,6 +171,16 @@ export default function App() {
 
     return createEmptySession(workoutDate, 'A')
   }, [state, workoutDate])
+
+  const savedSessionForWorkoutDate = useMemo(
+    () => getLatestSessionForDate(state.sessions, workoutDate),
+    [state.sessions, workoutDate]
+  )
+
+  const hasUnsavedWorkoutChanges = useMemo(
+    () => hasSessionChanges(sessionDraft, savedSessionForWorkoutDate),
+    [sessionDraft, savedSessionForWorkoutDate]
+  )
 
   const measurementDraft = useMemo(() => {
     const found = getMeasurementForDate(state.measurements, measurementDate)
@@ -138,6 +216,8 @@ export default function App() {
       const range = defaultExportRange(loadedState)
       setExportFromDate(range.fromDate)
       setExportToDate(range.toDate)
+      setSyncQueueSize(getSyncQueueSize())
+      setHasSyncToken(hasSheetsSyncToken())
       setLoaded(true)
     })()
   }, [])
@@ -257,21 +337,199 @@ export default function App() {
     }
   }
 
+  const runSheetsSync = async (
+    options: { force?: boolean; silent?: boolean } = {}
+  ): Promise<{ ok: boolean; pending: number; sent: number; failed: number; error?: string }> => {
+    const syncSettings = state.settings.sheetsSync
+
+    if (!syncSettings.enabled) {
+      const pending = getSyncQueueSize()
+      if (!options.silent) {
+        setMessage('Activa Google Sheets Sync para sincronizar.')
+      }
+      return { ok: false, pending, sent: 0, failed: 0, error: 'Sync desactivado' }
+    }
+
+    dispatch({
+      type: 'update_sheets_sync',
+      patch: {
+        lastSyncStatus: 'syncing',
+        lastSyncError: undefined
+      }
+    })
+
+    const result = await syncNow({
+      endpointUrl: syncSettings.endpointUrl,
+      schemaVersion: state.version,
+      deviceId: state.meta.deviceId,
+      force: options.force,
+      mode: syncSettings.mode
+    })
+
+    setSyncQueueSize(result.pending)
+
+    if (result.ok) {
+      dispatch({
+        type: 'update_sheets_sync',
+        patch: {
+          lastSyncStatus: 'success',
+          lastSyncAt: result.syncedAt || new Date().toISOString(),
+          lastSyncError: undefined
+        }
+      })
+
+      if (!options.silent) {
+        setMessage(result.sent ? `Sincronizacion completada (${result.sent} registros).` : 'Sin pendientes para sincronizar.')
+      }
+      return result
+    }
+
+    dispatch({
+      type: 'update_sheets_sync',
+      patch: {
+        lastSyncStatus: 'error',
+        lastSyncError: result.error
+      }
+    })
+
+    if (!options.silent) {
+      setMessage(result.error || 'No se pudo sincronizar con Google Sheets.')
+    }
+
+    return result
+  }
+
+  const queueForSync = (items: SyncQueueItemInput[]) => {
+    if (!items.length) return
+
+    const queueLength = enqueueSyncRows(items)
+    setSyncQueueSize(queueLength)
+
+    if (state.settings.sheetsSync.enabled && state.settings.sheetsSync.autoSyncOnSave) {
+      void runSheetsSync({ silent: true })
+    }
+  }
+
+  const updateSheetsSyncSettings = (patch: Partial<SheetsSyncSettings>) => {
+    dispatch({ type: 'update_sheets_sync', patch })
+  }
+
+  const saveSheetsToken = (token: string) => {
+    if (state.settings.sheetsSync.mode !== 'direct_webhook') {
+      setMessage('En modo backend el token se guarda en servidor, no en frontend.')
+      return
+    }
+
+    setSheetsSyncToken(token)
+    setHasSyncToken(hasSheetsSyncToken())
+    setMessage('Token de Google Sheets guardado localmente.')
+  }
+
+  const clearSavedSheetsToken = () => {
+    if (state.settings.sheetsSync.mode !== 'direct_webhook') {
+      setMessage('No hay token local en modo backend.')
+      return
+    }
+
+    clearSheetsSyncToken()
+    setHasSyncToken(false)
+    setMessage('Token local eliminado.')
+  }
+
+  const enqueueBackfillForSheets = () => {
+    const items: SyncQueueItemInput[] = [
+      ...state.sessions.flatMap((session) => toSyncRowsFromSession(session)),
+      ...state.measurements.flatMap((measurement) => toSyncRowsFromMeasurement(measurement)),
+      ...state.objectives.flatMap((objective) => toSyncRowsFromObjective(objective)),
+      ...state.trainingTemplates.flatMap((template) => toSyncRowsFromTemplate(template))
+    ]
+
+    const queueLength = enqueueSyncRows(items)
+    setSyncQueueSize(queueLength)
+    setMessage(`${items.length} registros encolados para backfill.`)
+  }
+
+  const clearSyncQueue = () => {
+    saveQueue([])
+    setSyncQueueSize(0)
+    dispatch({
+      type: 'update_sheets_sync',
+      patch: {
+        lastSyncStatus: 'idle',
+        lastSyncError: undefined
+      }
+    })
+    setMessage('Cola de sincronizacion limpiada.')
+  }
+
+  useEffect(() => {
+    if (!loaded) return
+
+    const syncSettings = state.settings.sheetsSync
+    const hasEndpoint = Boolean(syncSettings.endpointUrl.trim())
+    const hasAuth = syncSettings.mode === 'direct_webhook' ? hasSheetsSyncToken() : true
+
+    const canRetry =
+      syncSettings.enabled &&
+      hasEndpoint &&
+      hasAuth
+
+    if (!canRetry) return
+
+    void runSheetsSync({ silent: true })
+
+    const handleOnline = () => {
+      void runSheetsSync({ silent: true })
+    }
+
+    window.addEventListener('online', handleOnline)
+    return () => {
+      window.removeEventListener('online', handleOnline)
+    }
+  }, [
+    loaded,
+    state.settings.sheetsSync.enabled,
+    state.settings.sheetsSync.mode,
+    state.settings.sheetsSync.endpointUrl,
+    state.settings.sheetsSync.autoSyncOnSave
+  ])
+
   const updateSessionDraft = (session: WorkoutSessionLog) => {
     dispatch({ type: 'upsert_draft', date: workoutDate, session: { ...session, date: workoutDate } })
   }
 
   const saveSession = (session: WorkoutSessionLog) => {
+    const previousSavedSession = getLatestSessionForDate(state.sessions, workoutDate)
+    const normalizedSession: WorkoutSessionLog = {
+      ...session,
+      date: workoutDate,
+      createdAt: session.createdAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    }
+
     dispatch({
       type: 'upsert_session',
-      session: {
-        ...session,
-        date: workoutDate,
-        createdAt: session.createdAt || new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      },
+      session: normalizedSession,
       clearDraft: true
     })
+
+    const removedSets =
+      previousSavedSession && previousSavedSession.id === normalizedSession.id
+        ? previousSavedSession.sets.filter(
+            (savedSet) => !normalizedSession.sets.some((nextSet) => nextSet.id === savedSet.id)
+          )
+        : []
+
+    const syncRows: SyncQueueItemInput[] = [
+      ...toSyncRowsFromSession(normalizedSession),
+      ...toSoftDeleteRowsFromSets(previousSavedSession || normalizedSession, removedSets, normalizedSession.updatedAt)
+    ]
+
+    if (previousSavedSession && previousSavedSession.id !== normalizedSession.id) {
+      syncRows.push(...toSoftDeleteRowsFromSession(previousSavedSession, normalizedSession.updatedAt))
+    }
+
+    queueForSync(syncRows)
 
     if (workoutDate < exportFromDate) {
       setExportFromDate(workoutDate)
@@ -283,15 +541,32 @@ export default function App() {
     setMessage('Sesion guardada')
   }
 
+  const deleteSessionForWorkoutDate = () => {
+    const sessionToDelete = getLatestSessionForDate(state.sessions, workoutDate)
+    if (!sessionToDelete) {
+      dispatch({ type: 'clear_draft', date: workoutDate })
+      setMessage('No habia sesion guardada para borrar.')
+      return
+    }
+
+    dispatch({ type: 'delete_session', sessionId: sessionToDelete.id, date: workoutDate })
+    queueForSync(toSoftDeleteRowsFromSession(sessionToDelete))
+    setMessage('Sesion del dia eliminada.')
+  }
+
   const saveMeasurement = (measurement: MeasurementEntry) => {
+    const normalizedMeasurement: MeasurementEntry = {
+      ...measurement,
+      id: measurement.id || uid(),
+      date: measurementDate
+    }
+
     dispatch({
       type: 'upsert_measurement',
-      measurement: {
-        ...measurement,
-        id: measurement.id || uid(),
-        date: measurementDate
-      }
+      measurement: normalizedMeasurement
     })
+
+    queueForSync(toSyncRowsFromMeasurement(normalizedMeasurement))
 
     if (measurementDate < exportFromDate) {
       setExportFromDate(measurementDate)
@@ -304,12 +579,21 @@ export default function App() {
   }
 
   const upsertObjective = (objective: Objective) => {
-    dispatch({ type: 'upsert_objective', objective })
+    const now = new Date().toISOString()
+    const normalizedObjective: Objective = {
+      ...objective,
+      createdAt: objective.createdAt || now,
+      updatedAt: objective.updatedAt || now
+    }
+
+    dispatch({ type: 'upsert_objective', objective: normalizedObjective })
+    queueForSync(toSyncRowsFromObjective(normalizedObjective))
     setMessage('Objetivo actualizado')
   }
 
   const upsertTemplate = (template: TrainingTemplateDay) => {
     dispatch({ type: 'upsert_template', template })
+    queueForSync(toSyncRowsFromTemplate(template))
     setMessage('Plantilla de entrenamiento actualizada')
   }
 
@@ -409,11 +693,14 @@ export default function App() {
           sessionDate={workoutDate}
           onSessionDateChange={setWorkoutDate}
           sessionDraft={sessionDraft}
+          hasSavedSession={Boolean(savedSessionForWorkoutDate)}
+          hasUnsavedChanges={hasUnsavedWorkoutChanges}
           allSessions={state.sessions}
           templates={state.trainingTemplates}
           exerciseCatalog={state.exerciseCatalog}
           onSessionDraftChange={updateSessionDraft}
           onSaveSession={saveSession}
+          onDeleteSession={deleteSessionForWorkoutDate}
           onAddExercise={upsertExercise}
         />
       )
@@ -450,6 +737,8 @@ export default function App() {
         state={state}
         fromDate={exportFromDate}
         toDate={exportToDate}
+        syncQueueSize={syncQueueSize}
+        hasSyncToken={hasSyncToken}
         onFromDateChange={setExportFromDate}
         onToDateChange={setExportToDate}
         onExportBackupJson={onExportBackupJson}
@@ -458,6 +747,13 @@ export default function App() {
         onExportWorkoutSessionsCsv={onExportWorkoutSessionsCsv}
         onExportMeasurementsCsv={onExportMeasurementsCsv}
         onImportJson={importJson}
+        onUpdateSheetsSync={updateSheetsSyncSettings}
+        onSaveSheetsToken={saveSheetsToken}
+        onClearSheetsToken={clearSavedSheetsToken}
+        onSyncNow={() => runSheetsSync({ force: false })}
+        onRetryPendingSync={() => runSheetsSync({ force: true })}
+        onEnqueueBackfillSync={enqueueBackfillForSheets}
+        onClearSyncQueue={clearSyncQueue}
       />
     )
   }
